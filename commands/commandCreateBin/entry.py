@@ -27,7 +27,7 @@ ui = app.userInterface
 
 # *** The command identity information. ***
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdBin'
-CMD_NAME = 'Gridfinity bin'
+CMD_NAME = 'Gridfinity bin (parametric)'
 CMD_Description = 'Create simple gridfinity bin'
 
 commandUIState = CommandUiState(CMD_NAME)
