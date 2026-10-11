@@ -10,13 +10,17 @@ model. Plan: `docs/PARAMETRIC_PLAN.md`. Progress log (update after every milesto
 ## Running / testing locally
 
 - Pure-Python Fusion add-in, no build step. Fusion's bundled Python is 3.14 (macOS).
-- The repo is symlinked into Fusion's add-in folder:
-  `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/GridfinityGenerator → ~/Developer/FusionGridfinityGenerator`
+- The add-in is named **GridfinityGeneratorParametric** (entry file, manifest and the symlink name
+  must all match — Fusion requires it), manifest version 2.0.0.0. The repo is symlinked into
+  Fusion's add-in folder:
+  `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/GridfinityGeneratorParametric → ~/Developer/FusionGridfinityGenerator`
 - The **App Store build (1.4.3.0) is also installed** at
   `~/Library/Application Support/Autodesk/ApplicationPlugins/GridfinityGenerator.bundle` and
   runs on startup. The fork uses its own manifest GUID, `config.ADDIN_NAME =
-  'GridfinityGeneratorParametric'` (which prefixes every command id) and "(parametric)" command
-  labels, so both can run side by side. Keep those three differences when merging from upstream.
+  'GridfinityGeneratorParametric'` (which prefixes every command id), renamed entry
+  file/manifest and "(parametric)" command labels, so both can run side by side. Keep those
+  differences when merging from upstream (upstream renames of `GridfinityGenerator.py`/`.manifest`
+  will need manual resolution).
 - After editing code: Stop + Run the add-in in the Scripts and Add-Ins dialog. Fusion caches
   imported submodules; if a change does not show up, restart Fusion.
 - `config.DEBUG = True` → `futil.log` output goes to the *Text Commands* window (View → Show Text Commands).
