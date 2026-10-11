@@ -14,9 +14,9 @@ model. Plan: `docs/PARAMETRIC_PLAN.md`. Progress log (update after every milesto
   `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/GridfinityGenerator → ~/Developer/FusionGridfinityGenerator`
 - The **App Store build (1.4.3.0) is also installed** at
   `~/Library/Application Support/Autodesk/ApplicationPlugins/GridfinityGenerator.bundle` and
-  runs on startup. Same add-in id and command ids → both must not run at once. In Fusion:
-  *Shift+S → Add-Ins tab → GridfinityGenerator (the bundle one) → Stop, untick "Run on Startup"*,
-  then Run the symlinked one.
+  runs on startup. The fork uses its own manifest GUID, `config.ADDIN_NAME =
+  'GridfinityGeneratorParametric'` (which prefixes every command id) and "(parametric)" command
+  labels, so both can run side by side. Keep those three differences when merging from upstream.
 - After editing code: Stop + Run the add-in in the Scripts and Add-Ins dialog. Fusion caches
   imported submodules; if a change does not show up, restart Fusion.
 - `config.DEBUG = True` → `futil.log` output goes to the *Text Commands* window (View → Show Text Commands).
