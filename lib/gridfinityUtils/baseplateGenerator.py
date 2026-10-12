@@ -5,8 +5,11 @@ import os
 from . import const, commonUtils, filletUtils, combineUtils, faceUtils, extrudeUtils, sketchUtils, baseGenerator, patternUtils, shapeUtils, geometryUtils
 from .baseGeneratorInput import BaseGeneratorInput
 from .baseplateGeneratorInput import BaseplateGeneratorInput
+from .dim import Dim, DimPoint, dmax, toValueInput, applyExpression, isParametric
 
-def createGridfinityBaseplate(input: BaseplateGeneratorInput, targetComponent: adsk.fusion.Component):
+def createPocketToolBodies(input: BaseplateGeneratorInput, targetComponent: adsk.fusion.Component):
+    """Upstream's pocket tools: one base pocket body with its extra cutouts, repeated by a body
+    pattern. Used when the plate count is fixed (with connection holes)."""
     features = targetComponent.features
     cutoutInput = BaseGeneratorInput()
     cutoutInput.xyClearance = input.xyClearance
@@ -23,7 +26,7 @@ def createGridfinityBaseplate(input: BaseplateGeneratorInput, targetComponent: a
     cuttingTools: list[adsk.fusion.BRepBody] = [baseBody]
     extraCutoutBodies: list[adsk.fusion.BRepBody] = []
 
-    holeCenterPoint = adsk.core.Point3D.create(
+    holeCenterPoint = DimPoint(
         const.DIMENSION_SCREW_HOLES_OFFSET - input.xyClearance,
         const.DIMENSION_SCREW_HOLES_OFFSET - input.xyClearance,
         0
@@ -33,72 +36,12 @@ def createGridfinityBaseplate(input: BaseplateGeneratorInput, targetComponent: a
     connectionHoleXTool = None
 
     if input.hasSkeletonizedBottom:
-        centerCutoutSketch,centerCutoutSketchCircle = baseGenerator.createCircleAtPointSketch(
-            faceUtils.getBottomFace(baseBody),
-            input.magnetCutoutsDiameter / 2,
-            holeCenterPoint,
-            targetComponent
-        )
-        centerCutoutSketch.name = "center bottom cutout"
-        sketchUtils.convertToConstruction(centerCutoutSketch.sketchCurves)
-        sketchCurves = centerCutoutSketch.sketchCurves
-        dimensions = centerCutoutSketch.sketchDimensions
-        constraints = centerCutoutSketch.geometricConstraints
-        sketchLines = sketchCurves.sketchLines
-        screwHoleCircle = sketchCurves.sketchCircles.item(0)
-        arcStartingPoint = screwHoleCircle.centerSketchPoint.geometry.asVector()
-        arcStartingPoint.add(adsk.core.Vector3D.create(0, max(input.magnetCutoutsDiameter, input.screwHeadCutoutDiameter) / 2 + 0.1, 0))
-        arc = sketchCurves.sketchArcs.addByCenterStartSweep(
-            screwHoleCircle.centerSketchPoint,
-            arcStartingPoint.asPoint(),
-            math.radians(90),
-        )
-
-        verticalEdgeLine = min([line for line in sketchLines if sketchUtils.isVertical(line)], key=lambda x: abs(x.startSketchPoint.geometry.x))
-        horizontalEdgeLine = min([line for line in sketchLines if sketchUtils.isHorizontal(line)], key=lambda x: abs(x.startSketchPoint.geometry.y))
-
-        baseCenterOffsetX = input.baseWidth / 2 - input.xyClearance
-        baseCenterOffsetY = input.baseLength / 2 - input.xyClearance
-        line1 = sketchLines.addByTwoPoints(arc.startSketchPoint, adsk.core.Point3D.create(verticalEdgeLine.startSketchPoint.geometry.x, arc.startSketchPoint.geometry.y, 0))
-        line2 = sketchLines.addByTwoPoints(line1.endSketchPoint, adsk.core.Point3D.create(line1.endSketchPoint.geometry.x, baseCenterOffsetY, 0))
-        line3 = sketchLines.addByTwoPoints(line2.endSketchPoint, adsk.core.Point3D.create(-baseCenterOffsetX, baseCenterOffsetY, 0))
-        line4 = sketchLines.addByTwoPoints(line3.endSketchPoint, adsk.core.Point3D.create(line3.endSketchPoint.geometry.x, horizontalEdgeLine.startSketchPoint.geometry.y, 0))
-        line5 = sketchLines.addByTwoPoints(line4.endSketchPoint, adsk.core.Point3D.create(arc.endSketchPoint.geometry.x, line4.endSketchPoint.geometry.y, 0))
-        line6 = sketchLines.addByTwoPoints(line5.endSketchPoint, arc.endSketchPoint)
-        
-        constraints.addCoincident(line1.endSketchPoint, verticalEdgeLine)
-        constraints.addCoincident(line6.startSketchPoint, horizontalEdgeLine)
-        constraints.addCoincident(screwHoleCircle.centerSketchPoint, arc.centerSketchPoint)
-        constraints.addHorizontal(line1)
-        constraints.addPerpendicular(line1, line2)
-        constraints.addPerpendicular(line2, line3)
-        constraints.addPerpendicular(line3, line4)
-        constraints.addPerpendicular(line4, line5)
-        constraints.addPerpendicular(line5, line6)
-        constraints.addTangent(arc, line1)
-        constraints.addEqual(line1, line6)
-        constraints.addEqual(line2, line5)
-        dimensions.addRadialDimension(arc, arc.endSketchPoint.geometry, True)
-        dimensions.addDistanceDimension(
-            arc.endSketchPoint,
-            line3.endSketchPoint,
-            adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation,
-            line2.endSketchPoint.geometry
-            )
-
-        centerCutoutExtrudeFeature = extrudeUtils.simpleDistanceExtrude(
-            centerCutoutSketch.profiles.item(0),
-            adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
-            input.bottomExtensionHeight,
-            adsk.fusion.ExtentDirections.PositiveExtentDirection,
-            [],
-            targetComponent,
-        )
+        centerCutoutExtrudeFeature, cutoutCornerPoint = createSkeletonCutout(input, faceUtils.getBottomFace(baseBody), holeCenterPoint, targetComponent)
 
         constructionAxisInput: adsk.fusion.ConstructionAxisInput = targetComponent.constructionAxes.createInput()
         constructionAxisInput.setByNormalToFaceAtPoint(
             faceUtils.getBottomFace(baseBody),
-            line3.endSketchPoint,
+            cutoutCornerPoint,
         )
         constructionAxis = targetComponent.constructionAxes.add(constructionAxisInput)
         constructionAxis.isLightBulbOn = False
@@ -187,14 +130,211 @@ def createGridfinityBaseplate(input: BaseplateGeneratorInput, targetComponent: a
     patternInputBodies.add(baseBody)
     patternInput = rectangularPatternFeatures.createInput(patternInputBodies,
         targetComponent.xConstructionAxis,
-        adsk.core.ValueInput.createByReal(input.baseplateWidth),
-        adsk.core.ValueInput.createByReal(input.baseWidth),
+        toValueInput(input.baseplateWidth),
+        toValueInput(input.baseWidth),
         adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
     patternInput.directionTwoEntity = targetComponent.yConstructionAxis
-    patternInput.quantityTwo = adsk.core.ValueInput.createByReal(input.baseplateLength)
-    patternInput.distanceTwo = adsk.core.ValueInput.createByReal(input.baseLength)
+    patternInput.quantityTwo = toValueInput(input.baseplateLength)
+    patternInput.distanceTwo = toValueInput(input.baseLength)
     rectangularPattern = rectangularPatternFeatures.add(patternInput)
     cuttingTools = cuttingTools + list(rectangularPattern.bodies)
+    return (cuttingTools, connectionHoleYTool, connectionHoleXTool)
+
+def createSkeletonCutout(
+    input: BaseplateGeneratorInput,
+    bottomFace: adsk.fusion.BRepFace,
+    holeCenterPoint: DimPoint,
+    targetComponent: adsk.fusion.Component,
+    joinInto: adsk.fusion.BRepBody = None,
+):
+    """One quarter of the skeletonized bottom cutout under a base pocket, sketched on the pocket's
+    bottom face. A new body, or with `joinInto` joined into that body. Returns the extrude and
+    the sketch point at the base centre (the axis for the 4x circular pattern)."""
+    centerCutoutSketch,centerCutoutSketchCircle = baseGenerator.createCircleAtPointSketch(
+        bottomFace,
+        input.magnetCutoutsDiameter / 2,
+        holeCenterPoint,
+        targetComponent
+    )
+    centerCutoutSketch.name = "center bottom cutout"
+    sketchUtils.convertToConstruction(centerCutoutSketch.sketchCurves)
+    sketchCurves = centerCutoutSketch.sketchCurves
+    dimensions = centerCutoutSketch.sketchDimensions
+    constraints = centerCutoutSketch.geometricConstraints
+    sketchLines = sketchCurves.sketchLines
+    screwHoleCircle = sketchCurves.sketchCircles.item(0)
+    arcRadius = dmax(input.magnetCutoutsDiameter, input.screwHeadCutoutDiameter) / 2 + 0.1
+    arcStartingPoint = screwHoleCircle.centerSketchPoint.geometry.asVector()
+    arcStartingPoint.add(adsk.core.Vector3D.create(0, float(arcRadius), 0))
+    arc = sketchCurves.sketchArcs.addByCenterStartSweep(
+        screwHoleCircle.centerSketchPoint,
+        arcStartingPoint.asPoint(),
+        math.radians(90),
+    )
+
+    verticalEdgeLine = min([line for line in sketchLines if sketchUtils.isVertical(line)], key=lambda x: abs(x.startSketchPoint.geometry.x))
+    horizontalEdgeLine = min([line for line in sketchLines if sketchUtils.isHorizontal(line)], key=lambda x: abs(x.startSketchPoint.geometry.y))
+
+    baseCenterOffsetX = input.baseWidth / 2 - input.xyClearance
+    baseCenterOffsetY = input.baseLength / 2 - input.xyClearance
+    line1 = sketchLines.addByTwoPoints(arc.startSketchPoint, adsk.core.Point3D.create(verticalEdgeLine.startSketchPoint.geometry.x, arc.startSketchPoint.geometry.y, 0))
+    line2 = sketchLines.addByTwoPoints(line1.endSketchPoint, adsk.core.Point3D.create(line1.endSketchPoint.geometry.x, float(baseCenterOffsetY), 0))
+    line3 = sketchLines.addByTwoPoints(line2.endSketchPoint, adsk.core.Point3D.create(-float(baseCenterOffsetX), float(baseCenterOffsetY), 0))
+    line4 = sketchLines.addByTwoPoints(line3.endSketchPoint, adsk.core.Point3D.create(line3.endSketchPoint.geometry.x, horizontalEdgeLine.startSketchPoint.geometry.y, 0))
+    line5 = sketchLines.addByTwoPoints(line4.endSketchPoint, adsk.core.Point3D.create(arc.endSketchPoint.geometry.x, line4.endSketchPoint.geometry.y, 0))
+    line6 = sketchLines.addByTwoPoints(line5.endSketchPoint, arc.endSketchPoint)
+
+    constraints.addCoincident(line1.endSketchPoint, verticalEdgeLine)
+    constraints.addCoincident(line6.startSketchPoint, horizontalEdgeLine)
+    constraints.addCoincident(screwHoleCircle.centerSketchPoint, arc.centerSketchPoint)
+    constraints.addHorizontal(line1)
+    constraints.addPerpendicular(line1, line2)
+    constraints.addPerpendicular(line2, line3)
+    constraints.addPerpendicular(line3, line4)
+    constraints.addPerpendicular(line4, line5)
+    constraints.addPerpendicular(line5, line6)
+    constraints.addTangent(arc, line1)
+    constraints.addEqual(line1, line6)
+    constraints.addEqual(line2, line5)
+    arcRadiusDimension = dimensions.addRadialDimension(arc, arc.endSketchPoint.geometry, True)
+    applyExpression(arcRadiusDimension, arcRadius)
+    cutoutWidthDimension = dimensions.addDistanceDimension(
+        arc.endSketchPoint,
+        line3.endSketchPoint,
+        adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation,
+        line2.endSketchPoint.geometry
+        )
+    # From the arc end to the base centre. Driven explicitly: left to the sketch solver, a base
+    # other than 42 mm put the cutout corner 1 mm past the base centre (upstream behaviour),
+    # so the four cutouts overlapped; at 42 mm the value is unchanged.
+    cutoutWidthDimension.parameter.expression = (baseCenterOffsetX - holeCenterPoint.x - arcRadius).expr
+
+    centerCutoutExtrudeFeature = extrudeUtils.simpleDistanceExtrude(
+        centerCutoutSketch.profiles.item(0),
+        adsk.fusion.FeatureOperations.JoinFeatureOperation if joinInto is not None else adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+        input.bottomExtensionHeight,
+        adsk.fusion.ExtentDirections.PositiveExtentDirection,
+        [joinInto] if joinInto is not None else [],
+        targetComponent,
+    )
+    return (centerCutoutExtrudeFeature, line3.endSketchPoint)
+
+def createPocketToolPattern(input: BaseplateGeneratorInput, targetComponent: adsk.fusion.Component) -> adsk.fusion.BRepBody:
+    """All base pockets (and their skeleton / magnet / screw cutouts) as one tool body whose cell
+    count follows the plate count expressions.
+
+    Same approach as the bin bases (see baseGenerator.createBaseFeaturePattern): every pocket feature
+    joins a thin carrier plate (above the plate top, where it cuts nothing), repeated by a feature
+    pattern with no bodies, fillets or chamfers of its own. The plate is then cut once with the
+    carrier, one body for any count."""
+    xyClearance = input.xyClearance
+    holeOffset = const.DIMENSION_SCREW_HOLES_OFFSET
+    cutoutInput = BaseGeneratorInput()
+    cutoutInput.xyClearance = xyClearance
+    cutoutInput.originPoint = DimPoint(-xyClearance * 2, -xyClearance * 2, 0)
+    cutoutInput.baseWidth = input.baseWidth + xyClearance * 2
+    cutoutInput.baseLength = input.baseLength + xyClearance * 2
+    cutoutInput.cornerFilletRadius = input.cornerFilletRadius + xyClearance
+
+    carrierInset = baseGenerator.BASE_CARRIER_INSET
+    carrierExtrude = extrudeUtils.createBoxAtPoint(
+        input.baseplateWidth * input.baseWidth - xyClearance * 2 - carrierInset * 2,
+        input.baseplateLength * input.baseLength - xyClearance * 2 - carrierInset * 2,
+        baseGenerator.BASE_CARRIER_THICKNESS,
+        targetComponent,
+        DimPoint(carrierInset, carrierInset, 0),
+    )
+    carrierExtrude.name = 'Pocket tool carrier'
+    carrier = carrierExtrude.bodies.item(0)
+    carrier.name = 'Pocket tool'
+
+    design = targetComponent.parentDesign
+    firstIndex = design.timeline.count
+    baseGenerator.createSingleGridfinityBaseBody(cutoutInput, targetComponent, combineInto=carrier, combine=combineUtils.joinBodies)
+    # the pocket bottom is the lowest face so far; a plane made from it outlives later joins there
+    bottomFace = faceUtils.getBottomFace(carrier)
+    bottomPlaneInput = targetComponent.constructionPlanes.createInput()
+    bottomPlaneInput.setByOffset(bottomFace, adsk.core.ValueInput.createByReal(0))
+    bottomPlane = targetComponent.constructionPlanes.add(bottomPlaneInput)
+    bottomPlane.name = 'Pocket bottom plane'
+    bottomPlane.isLightBulbOn = False
+    holeCenterPoint = DimPoint(holeOffset - xyClearance, holeOffset - xyClearance, 0)
+
+    if input.hasSkeletonizedBottom:
+        skeletonStart = design.timeline.count
+        createSkeletonCutout(input, bottomFace, holeCenterPoint, targetComponent, joinInto=carrier)
+        skeletonFeatures = baseGenerator.timelineFeaturesSince(design, skeletonStart)
+        centerAxis = createVerticalAxis(input.baseWidth / 2 - xyClearance, input.baseLength / 2 - xyClearance, 'Pocket centre', targetComponent)
+        skeletonPatternInput = targetComponent.features.circularPatternFeatures.createInput(commonUtils.objectCollectionFromList(skeletonFeatures), centerAxis)
+        skeletonPatternInput.quantity = adsk.core.ValueInput.createByString('4')
+        skeletonPatternInput.patternComputeOption = adsk.fusion.PatternComputeOptions.AdjustPatternCompute
+        targetComponent.features.circularPatternFeatures.add(skeletonPatternInput).name = 'Skeleton cutout pattern'
+
+    if input.hasExtendedBottom and (input.hasMagnetCutouts or input.hasScrewHoles):
+        holesStart = design.timeline.count
+        if input.hasMagnetCutouts:
+            shapeUtils.simpleCylinder(bottomPlane, 0, input.magnetCutoutsDepth, input.magnetCutoutsDiameter / 2, holeCenterPoint, targetComponent, joinInto=carrier)
+        if input.hasScrewHoles:
+            shapeUtils.simpleCylinder(bottomPlane, 0, input.bottomExtensionHeight, input.screwHolesDiameter / 2, holeCenterPoint, targetComponent, joinInto=carrier)
+            # screw head: a short cylinder at the bottom, then a 45 degree countersink up to the screw
+            # hole (upstream: a cylinder with its top edge chamfered)
+            countersink = (input.screwHeadCutoutDiameter - input.screwHolesDiameter) / 2
+            headStraight = const.DIMENSION_SCREW_HEAD_CUTOUT_OFFSET_HEIGHT
+            shapeUtils.simpleCylinder(bottomPlane, input.bottomExtensionHeight - headStraight, headStraight,
+                input.screwHeadCutoutDiameter / 2, holeCenterPoint, targetComponent, joinInto=carrier)
+            shapeUtils.simpleCylinder(bottomPlane, input.bottomExtensionHeight - headStraight, -countersink,
+                input.screwHeadCutoutDiameter / 2, holeCenterPoint, targetComponent, joinInto=carrier, taperAngle='-45 deg')
+        holeFeatures = baseGenerator.timelineFeaturesSince(design, holesStart)
+        holesPatternInput = targetComponent.features.rectangularPatternFeatures.createInput(commonUtils.objectCollectionFromList(holeFeatures),
+            targetComponent.xConstructionAxis,
+            adsk.core.ValueInput.createByString('2'),
+            toValueInput(input.baseWidth - holeOffset * 2),
+            adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
+        holesPatternInput.directionTwoEntity = targetComponent.yConstructionAxis
+        holesPatternInput.quantityTwo = adsk.core.ValueInput.createByString('2')
+        holesPatternInput.distanceTwo = toValueInput(input.baseLength - holeOffset * 2)
+        holesPatternInput.patternComputeOption = adsk.fusion.PatternComputeOptions.AdjustPatternCompute
+        targetComponent.features.rectangularPatternFeatures.add(holesPatternInput).name = 'Magnet and screw holes pattern'
+
+    pocketFeatures = baseGenerator.timelineFeaturesSince(design, firstIndex)
+    pocketPatternInput = targetComponent.features.rectangularPatternFeatures.createInput(commonUtils.objectCollectionFromList(pocketFeatures),
+        targetComponent.xConstructionAxis,
+        toValueInput(input.baseplateWidth),
+        toValueInput(input.baseWidth),
+        adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
+    pocketPatternInput.directionTwoEntity = targetComponent.yConstructionAxis
+    pocketPatternInput.quantityTwo = toValueInput(input.baseplateLength)
+    pocketPatternInput.distanceTwo = toValueInput(input.baseLength)
+    pocketPatternInput.patternComputeOption = adsk.fusion.PatternComputeOptions.AdjustPatternCompute
+    targetComponent.features.rectangularPatternFeatures.add(pocketPatternInput).name = 'Pocket pattern'
+    return carrier
+
+def createVerticalAxis(x, y, name: str, targetComponent: adsk.fusion.Component):
+    """Hidden construction axis parallel to Z through (x, y); follows x/y when they are Dims."""
+    planes = targetComponent.constructionPlanes
+    xzPlaneInput = planes.createInput()
+    xzPlaneInput.setByOffset(targetComponent.xZConstructionPlane, toValueInput(y))
+    xzPlane = planes.add(xzPlaneInput)
+    xzPlane.isLightBulbOn = False
+    yzPlaneInput = planes.createInput()
+    yzPlaneInput.setByOffset(targetComponent.yZConstructionPlane, toValueInput(x))
+    yzPlane = planes.add(yzPlaneInput)
+    yzPlane.isLightBulbOn = False
+    axisInput = targetComponent.constructionAxes.createInput()
+    axisInput.setByTwoPlanes(xzPlane, yzPlane)
+    axis = targetComponent.constructionAxes.add(axisInput)
+    axis.name = f"{name} axis"
+    axis.isLightBulbOn = False
+    return axis
+
+def createGridfinityBaseplate(input: BaseplateGeneratorInput, targetComponent: adsk.fusion.Component):
+    features = targetComponent.features
+    if isParametric(input.baseplateWidth, input.baseplateLength):
+        cuttingTools = [createPocketToolPattern(input, targetComponent)]
+        connectionHoleYTool = None
+        connectionHoleXTool = None
+    else:
+        cuttingTools, connectionHoleYTool, connectionHoleXTool = createPocketToolBodies(input, targetComponent)
 
     # create baseplate body
     baseplateTrueWidth = input.baseplateWidth * input.baseWidth - input.xyClearance * 2
@@ -351,12 +491,12 @@ def createGridfinityBaseplate(input: BaseplateGeneratorInput, targetComponent: a
         connectionHoleYToolList = list(connectionHoleYTool.bodies) + list(holeToolsYFeature.bodies)
 
         constructionPlaneXZInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
-        constructionPlaneXZInput.setByOffset(targetComponent.xZConstructionPlane, adsk.core.ValueInput.createByReal(input.baseplateLength * input.baseLength / 2 - input.xyClearance))
+        constructionPlaneXZInput.setByOffset(targetComponent.xZConstructionPlane, toValueInput(input.baseplateLength * input.baseLength / 2 - input.xyClearance))
         constructionPlaneXZ = targetComponent.constructionPlanes.add(constructionPlaneXZInput)
         constructionPlaneXZ.isLightBulbOn = False
 
         constructionPlaneYZInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
-        constructionPlaneYZInput.setByOffset(targetComponent.yZConstructionPlane, adsk.core.ValueInput.createByReal(input.baseplateWidth * input.baseWidth / 2 - input.xyClearance))
+        constructionPlaneYZInput.setByOffset(targetComponent.yZConstructionPlane, toValueInput(input.baseplateWidth * input.baseWidth / 2 - input.xyClearance))
         constructionPlaneYZ = targetComponent.constructionPlanes.add(constructionPlaneYZInput)
         constructionPlaneYZ.isLightBulbOn = False
 
@@ -395,10 +535,10 @@ def createConnectionHoleTool(connectionHoleFace: adsk.fusion.BRepFace, diameter:
     
     circle = sketchCurves.sketchCircles.addByCenterRadius(
         connectionHoleSketch.originPoint.geometry,
-        diameter
+        float(diameter)
     )
     constraints.addMidPoint(circle.centerSketchPoint, line1)
-    dimensions.addRadialDimension(circle, line1.startSketchPoint.geometry, True)
+    applyExpression(dimensions.addRadialDimension(circle, line1.startSketchPoint.geometry, True), diameter)
     connectionHoleTool = extrudeUtils.simpleDistanceExtrude(
         connectionHoleSketch.profiles.item(0),
         adsk.fusion.FeatureOperations.NewBodyFeatureOperation,

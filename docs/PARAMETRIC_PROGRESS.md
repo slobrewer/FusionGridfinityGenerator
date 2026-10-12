@@ -11,7 +11,7 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
 | M2 Footprint scalars | done 2026-10-11 | `parametric-m2`, PR #2 | `base_width`, `base_length`, `xy_clearance`, `wall_thickness` live |
 | M3 Feature scalars | done 2026-10-11 | `parametric-m3`, PR #3 | screw/magnet diameter, magnet depth, scoop radius, tab length/width/offset/angle live |
 | M4 X/Y count (feature pattern) | done 2026-10-11 | `parametric-m4`, PR #4 | `bin_width_u`, `bin_length_u` live (body bins); bases rebuilt as a feature pattern into a carrier |
-| M5 Baseplate | not started | | |
+| M5 Baseplate | done 2026-10-11 | `parametric-m5`, PR #5 | `gfpN_*` group; plate count, base size, clearance, magnets/screws, padding, extra bottom, vertical clearance live |
 
 ## How to test
 
@@ -95,6 +95,25 @@ every rule below came from a failing case:
    and the floor fillets lose their edges when the bin shrinks).
 Base-only bins keep upstream's body pattern; their count parameters are marked info only.
 
+### M5 (baseplate)
+
+- Every baseplate dialog value is recorded in a `gfpN_*` group (`binParameters.createBaseplateParameters`).
+  Live: plate X/Y count, base size, xy clearance, magnet diameter/depth, screw / screw head
+  diameter, padding (each side), extra bottom thickness, vertical clearance, connection hole
+  diameter. Info only: plate type and the yes/no options (create-time branches; a padding side
+  that was 0 at creation stays absent).
+- Plate count uses the M4 recipe in reverse: all pockets (+ skeleton, magnet, screw, screw-head
+  cutouts) are joined into one *tool* carrier plate that sits above the plate top (where it cuts
+  nothing), as a feature pattern of tapered extrudes/joins; the plate is cut once with that body.
+  The screw-head countersink (upstream: cylinder + chamfer) is a tapered extrude. The skeleton
+  quarter cutout is circular-patterned about an axis from two offset planes (upstream: normal to
+  the pocket face at a sketch point).
+- With connection holes (skeletonized) the plate keeps upstream's body patterns and mirrors, so
+  the plate count is info only there.
+- Upstream quirk fixed: the skeleton cutout's width dimension was left to the sketch solver, which
+  for bases other than 42 mm put the cutout corner 1 mm past the base centre (the four quarters
+  overlapped). It is now driven to the base centre; 42 mm plates are unchanged.
+
 ## Log
 
 - 2026-10-11 — Forked, cloned, branch `parametric-user-parameters`, symlinked into Fusion AddIns
@@ -120,12 +139,17 @@ Base-only bins keep upstream's body pattern; their count parameters are marked i
   groove drawn pre-rotated, clearance cut without participant list, scoop length cap. New test
   groups: `count` (10 edited-vs-fresh incl. 2x3→3x4/1x1, 1x1→3x2, shelled, solid, body-only) and
   `stress` (6 mixes x 6 sizes up to 6x3: create == App Store build, count edit == fresh build).
+- 2026-10-11 — M5 implemented (baseplate parameters + plate count via a pocket tool carrier).
+  `tests/fusion/baseplate_test.py`: upstream 8/8, scalars 9/9, count 7/7, stress (3 plate types
+  x 6 sizes).
 
 ## Current state / next step
 
-Demo-able: create a bin with the dialog, then Modify > Change Parameters > any numeric `gfb1_*`
-value except the bin X/Y count: height, height unit, base size, wall, xy clearance, screw/magnet
-sizes, magnet depth, scoop radius, tab length/width/offset/angle. Not yet verified by hand: that
-preview ("Update preview once") does not leave extra `gfbN_` parameters behind.
+All planned milestones (M0–M5) are done. Demo-able: create a bin or a baseplate with the
+dialog, then Modify > Change Parameters > any numeric `gfbN_*` / `gfpN_*` value (sizes, counts,
+clearances, magnets/screws, scoop, tab, padding, …). Not yet verified by hand: that preview
+("Update preview once") does not leave extra parameters behind.
 
-Next step: M4 — bin X/Y count (`bin_width_u`, `bin_length_u`) via feature patterns.
+Possible next steps (not planned): compartment grid counts (needs the same feature-pattern
+treatment), making yes/no options live (suppress features by expression is not available in the
+API — would need rebuild-on-change), connection holes with a live plate count.

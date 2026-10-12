@@ -45,6 +45,33 @@ BIN_PARAMETER_SPECS = [
     ParameterSpec('has_magnet_tabs', UNITLESS, 'magnet socket tabs (1/0)', False),
 ]
 
+BASEPLATE_PARAMETER_PREFIX = 'gfp'
+
+# Order here is the order parameters appear in Change Parameters.
+BASEPLATE_PARAMETER_SPECS = [
+    ParameterSpec('plate_width_u', UNITLESS, 'plate width, X (u)', True),
+    ParameterSpec('plate_length_u', UNITLESS, 'plate length, Y (u)', True),
+    ParameterSpec('base_width', LENGTH, 'base width unit', True),
+    ParameterSpec('base_length', LENGTH, 'base length unit', True),
+    ParameterSpec('xy_clearance', LENGTH, 'bin xy clearance', True),
+    ParameterSpec('magnet_diameter', LENGTH, 'magnet cutout diameter', True),
+    ParameterSpec('magnet_depth', LENGTH, 'magnet cutout depth', True),
+    ParameterSpec('screw_diameter', LENGTH, 'screw hole diameter', True),
+    ParameterSpec('screw_head_diameter', LENGTH, 'screw head cutout diameter', True),
+    ParameterSpec('padding_left', LENGTH, 'side padding left', True),
+    ParameterSpec('padding_top', LENGTH, 'side padding top', True),
+    ParameterSpec('padding_right', LENGTH, 'side padding right', True),
+    ParameterSpec('padding_bottom', LENGTH, 'side padding bottom', True),
+    ParameterSpec('extra_bottom_thickness', LENGTH, 'extra bottom thickness', True),
+    ParameterSpec('vertical_clearance', LENGTH, 'bin vertical clearance', True),
+    ParameterSpec('connection_hole_diameter', LENGTH, 'connection hole diameter', True),
+    ParameterSpec('plate_type', UNITLESS, 'plate type (0 = light, 1 = full, 2 = skeletonized)', False),
+    ParameterSpec('has_magnets', UNITLESS, 'magnet sockets (1/0)', False),
+    ParameterSpec('has_screws', UNITLESS, 'screw holes (1/0)', False),
+    ParameterSpec('has_padding', UNITLESS, 'side padding (1/0)', False),
+    ParameterSpec('has_connection_holes', UNITLESS, 'connection holes (1/0)', False),
+]
+
 def allocatePrefix(design: adsk.fusion.Design, base: str = BIN_PARAMETER_PREFIX) -> str:
     """Smallest gfbN_ prefix not used by any existing user parameter."""
     names = [design.userParameters.item(i).name for i in range(design.userParameters.count)]
