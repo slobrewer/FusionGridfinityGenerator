@@ -241,6 +241,30 @@ def footprintGroup(entry, app):
             results.append(equivalenceCase(entry, app, f'{changeName} ({mixName})', parameterChanges, finalOverrides, **overrides)[1])
     return results
 
+def featuresGroup(entry, app):
+    """M3: screw / magnet sizes, scoop radius, label tab length / width / offset / angle."""
+    results = []
+    shelledTab = dict(bin_type=entry.BIN_TYPE_SHELLED, tab=True)
+    checks = [
+        ('magnet 6.5 -> 6 mm, depth 2.4 -> 2 mm (full)', [('magnet_diameter', '6 mm'), ('magnet_depth', '2 mm')],
+         dict(magnet_diameter=0.6, magnet_depth=0.2), FULL),
+        ('magnet depth 2.4 -> 2.8 mm, no tabs (magnets + screws)', [('magnet_depth', '2.8 mm')],
+         dict(magnet_depth=0.28), dict(magnets=True, screw_holes=True)),
+        ('screw 3 -> 2.5 mm (full)', [('screw_diameter', '2.5 mm')], dict(screw_diameter=0.25), FULL),
+        ('scoop radius 25 -> 15 mm (scoop + tab)', [('scoop_radius', '15 mm')], dict(scoop_radius=1.5), SCOOP_TAB),
+        ('scoop radius 25 -> 10 mm (no lip, scoop)', [('scoop_radius', '10 mm')], dict(scoop_radius=1.0), dict(lip=False, scoop=True)),
+        ('tab angle 45 -> 60 deg (scoop + tab)', [('tab_angle', '60 deg')], dict(tab_angle=1.0471975511965976), SCOOP_TAB),
+        ('tab angle 45 -> 35 deg (shelled + tab)', [('tab_angle', '35 deg')], dict(tab_angle=0.6108652381980153), shelledTab),
+        ('tab width 13 -> 10 mm (full)', [('tab_width', '10 mm')], dict(tab_width=1.0), FULL),
+        ('tab length 1u -> 2u (scoop + tab)', [('tab_length_u', '2')], dict(tab_length=2), SCOOP_TAB),
+        ('tab offset 0 -> 1u (scoop + tab)', [('tab_offset_u', '1')], dict(tab_position=1), SCOOP_TAB),
+        ('tab offset 0 -> 1u, length 1u -> 0.5u (shelled + tab)', [('tab_offset_u', '1'), ('tab_length_u', '0.5')],
+         dict(tab_position=1, tab_length=0.5), shelledTab),
+    ]
+    for label, changes, finalOverrides, overrides in checks:
+        results.append(equivalenceCase(entry, app, label, changes, finalOverrides, **overrides)[1])
+    return results
+
 def prefixGroup(entry, app):
     newDocument(app)
     design = adsk.fusion.Design.cast(app.activeProduct)
@@ -294,6 +318,7 @@ GROUPS = {
     'upstream': upstreamGroup,
     'height': heightGroup,
     'footprint': footprintGroup,
+    'features': featuresGroup,
     'prefix': prefixGroup,
 }
 

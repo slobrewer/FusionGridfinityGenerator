@@ -12,7 +12,7 @@ from . import const, combineUtils, faceUtils, commonUtils, sketchUtils, extrudeU
 from .baseGeneratorInput import BaseGeneratorInput
 from .binBodyTabGeneratorInput import BinBodyTabGeneratorInput
 from ... import config
-from .dim import toValueInput, applyExpression
+from .dim import Dim, toValueInput, applyExpression, isParametric, dtan
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -41,8 +41,11 @@ def createGridfinityBinBodyTab(
     tabSketchLine = tabSketch.sketchCurves.sketchLines
     tabTopEdgeHeight = input.origin.z - input.topClearance
     originX, originY, topEdgeZ = float(input.origin.x), float(input.origin.y), float(tabTopEdgeHeight)
-    actualTabWidth = input.width + BIN_TAB_EDGE_FILLET_RADIUS / math.tan((math.radians(90) - input.overhangAngle) / 2)
-    actualTabHeight = actualTabWidth / math.tan(input.overhangAngle)
+    # a constant length in a quotient must carry its unit when the rest is an expression
+    edgeFilletRadius = Dim.cm(BIN_TAB_EDGE_FILLET_RADIUS) if isParametric(input.width, input.overhangAngle) else BIN_TAB_EDGE_FILLET_RADIUS
+    tabWidth = input.width + edgeFilletRadius / dtan((math.radians(90) - input.overhangAngle) / 2)
+    actualTabWidth = float(tabWidth)
+    actualTabHeight = actualTabWidth / math.tan(float(input.overhangAngle))
     line1 = tabSketchLine.addByTwoPoints(
         tabSketch.modelToSketchSpace(adsk.core.Point3D.create(originX, originY, topEdgeZ)),
         tabSketch.modelToSketchSpace(adsk.core.Point3D.create(originX, originY, topEdgeZ - actualTabHeight)),
@@ -88,20 +91,28 @@ def createGridfinityBinBodyTab(
     applyExpression(originHorizontalDimension if sketchXIsModelZ else originVerticalDimension, tabTopEdgeHeight)
     applyExpression(originVerticalDimension if sketchXIsModelZ else originHorizontalDimension, input.origin.y)
 
-    dimensions.addDistanceDimension(
+    tabWidthDimension = dimensions.addDistanceDimension(
         line2.startSketchPoint,
         line2.endSketchPoint,
         adsk.fusion.DimensionOrientations.VerticalDimensionOrientation,
         line2.endSketchPoint.geometry,
         True
         )
-            
-    dimensions.addAngularDimension(
+    applyExpression(tabWidthDimension, tabWidth)
+
+    overhangAngleDimension = dimensions.addAngularDimension(
         line1,
         line3,
         line1.endSketchPoint.geometry,
         True,
         )
+    if isParametric(input.overhangAngle):
+        # the dimension measures either the overhang angle or its supplement depending on the
+        # quadrant Fusion picks; link whichever one it shows
+        if math.isclose(overhangAngleDimension.parameter.value, float(input.overhangAngle), abs_tol=1e-6):
+            applyExpression(overhangAngleDimension, input.overhangAngle)
+        else:
+            applyExpression(overhangAngleDimension, math.radians(180) - input.overhangAngle)
 
     tabExtrudeFeature = extrudeUtils.simpleDistanceExtrude(
         tabSketch.profiles.item(0),

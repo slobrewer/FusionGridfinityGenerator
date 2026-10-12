@@ -1,11 +1,12 @@
 # Run from the repo root:  python3 -m unittest discover -s tests
+import math
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib', 'gridfinityUtils'))
 
-from dim import Dim, DimPoint, dmax, dmin, LENGTH, UNITLESS, ANGLE, literalExpression  # noqa: E402
+from dim import Dim, DimPoint, dmax, dmin, dtan, LENGTH, UNITLESS, ANGLE, literalExpression  # noqa: E402
 
 
 class LiteralTests(unittest.TestCase):
@@ -79,6 +80,14 @@ class ArithmeticTests(unittest.TestCase):
         self.assertEqual((1 / self.binHeight).expr, '1 / gfb1_bin_height_u')
         self.assertEqual(0 * self.heightUnit, 0.0)
         self.assertIs(self.heightUnit - 0 * self.heightUnit, self.heightUnit)
+
+    def test_tab_width_with_tangent(self):
+        angle = Dim.named('gfb1_tab_angle', math.radians(45), ANGLE)
+        width = Dim.named('gfb1_tab_width', 1.3, LENGTH)
+        actual = width + Dim.cm(0.06) / dtan((math.radians(90) - angle) / 2)
+        self.assertEqual(actual.expr, 'gfb1_tab_width + (0.6 mm / tan((90 deg - gfb1_tab_angle) / 2))')
+        self.assertAlmostEqual(actual.value, 1.3 + 0.06 / math.tan(math.radians(22.5)))
+        self.assertEqual(dtan(0.5), math.tan(0.5))
 
     def test_double_negation_and_abs(self):
         offset = self.heightUnit - 0.1

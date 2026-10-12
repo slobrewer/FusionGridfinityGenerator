@@ -10,10 +10,12 @@ from ...lib.gridfinityUtils import combineUtils
 from ...lib.gridfinityUtils import geometryUtils
 from ...lib.gridfinityUtils import faceUtils
 from ...lib.gridfinityUtils import shellUtils
+from ...lib.gridfinityUtils import extrudeUtils
+from ...lib.gridfinityUtils import filletUtils
 from ...lib.gridfinityUtils import commonUtils
 from ...lib.gridfinityUtils import const
 from ...lib.gridfinityUtils import binParameters
-from ...lib.gridfinityUtils.dim import DimPoint, dmax
+from ...lib.gridfinityUtils.dim import DimPoint, dmax, dmin
 from ...lib.gridfinityUtils.baseGenerator import createSingleGridfinityBaseBody, createBaseBodyPattern, cutBaseClearance
 from ...lib.gridfinityUtils.baseGeneratorInput import BaseGeneratorInput
 from ...lib.gridfinityUtils.binBodyGenerator import createGridfinityBinBody, uniformCompartments
@@ -963,9 +965,9 @@ def generateBin(args: adsk.core.CommandEventArgs):
         baseGeneratorInput.hasScrewHoles = bin_screw_holes.value and not isShelled
         baseGeneratorInput.hasMagnetCutouts = bin_magnet_cutouts.value and not isShelled
         baseGeneratorInput.hasMagnetCutoutsTabs = bin_magnet_cutouts_tabs.value and not isShelled
-        baseGeneratorInput.screwHolesDiameter = bin_screw_hole_diameter.value
-        baseGeneratorInput.magnetCutoutsDiameter = bin_magnet_cutout_diameter.value
-        baseGeneratorInput.magnetCutoutsDepth = bin_magnet_cutout_depth.value
+        baseGeneratorInput.screwHolesDiameter = liveValue('screw_diameter', bin_screw_hole_diameter.value)
+        baseGeneratorInput.magnetCutoutsDiameter = liveValue('magnet_diameter', bin_magnet_cutout_diameter.value)
+        baseGeneratorInput.magnetCutoutsDepth = liveValue('magnet_depth', bin_magnet_cutout_depth.value)
 
         baseBodies: list[adsk.fusion.BRepBody]
         if bin_generate_base.value:
@@ -991,12 +993,12 @@ def generateBin(args: adsk.core.CommandEventArgs):
         binBodyInput.isSolid = isSolid or isShelled
         binBodyInput.wallThickness = liveValue('wall_thickness', bin_wall_thickness.value)
         binBodyInput.hasScoop = has_scoop.value and isHollow
-        binBodyInput.scoopMaxRadius = binScoopMaxRadius.value
+        binBodyInput.scoopMaxRadius = liveValue('scoop_radius', binScoopMaxRadius.value)
         binBodyInput.hasTab = hasTabInput.value and isHollow
-        binBodyInput.tabLength = binTabLength.value
-        binBodyInput.tabWidth = binTabWidth.value
-        binBodyInput.tabPosition = binTabPosition.value
-        binBodyInput.tabOverhangAngle = binTabAngle.value
+        binBodyInput.tabLength = liveValue('tab_length_u', binTabLength.value)
+        binBodyInput.tabWidth = liveValue('tab_width', binTabWidth.value)
+        binBodyInput.tabPosition = liveValue('tab_offset_u', binTabPosition.value)
+        binBodyInput.tabOverhangAngle = liveValue('tab_angle', binTabAngle.value)
         binBodyInput.compartmentsByX = compartmentsX.value
         binBodyInput.compartmentsByY = compartmentsY.value
 
@@ -1065,26 +1067,42 @@ def generateBin(args: adsk.core.CommandEventArgs):
             if hasTabInput.value:
                 compartmentTabInput = BinBodyTabGeneratorInput()
                 tabOriginPoint = DimPoint(
-                    binBodyInput.wallThickness + max(0, min(binBodyInput.tabPosition, binBodyInput.binWidth - binBodyInput.tabLength)) * binBodyInput.baseWidth,
+                    binBodyInput.wallThickness + dmax(0, dmin(binBodyInput.tabPosition, binBodyInput.binWidth - binBodyInput.tabLength)) * binBodyInput.baseWidth,
                     const.BIN_LIP_WALL_THICKNESS if binBodyInput.hasLip and binBodyInput.hasScoop else binBodyInput.wallThickness + binBodyInput.binLength * binBodyInput.baseLength - binBodyInput.wallThickness - binBodyInput.xyClearance * 2,
                     (binBodyInput.binHeight - 1) * binBodyInput.heightUnit + dmax(0, binBodyInput.heightUnit - const.BIN_BASE_HEIGHT),
                 )
                 compartmentTabInput.origin = tabOriginPoint
-                compartmentTabInput.length = max(0, min(binBodyInput.tabLength, binBodyInput.binWidth)) * binBodyInput.baseWidth - binBodyInput.wallThickness * 2 - binBodyInput.xyClearance * 2
+                compartmentTabInput.length = dmax(0, dmin(binBodyInput.tabLength, binBodyInput.binWidth)) * binBodyInput.baseWidth - binBodyInput.wallThickness * 2 - binBodyInput.xyClearance * 2
                 compartmentTabInput.width = binBodyInput.tabWidth
                 compartmentTabInput.overhangAngle = binBodyInput.tabOverhangAngle
                 compartmentTabInput.topClearance = const.BIN_TAB_TOP_CLEARANCE
                 tabBody = createGridfinityBinBodyTab(compartmentTabInput, gridfinityBinComponent)
-                combineInput = combineFeatures.createInput(tabBody, commonUtils.objectCollectionFromList([binBody]))
-                combineInput.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
-                combineInput.isKeepToolBodies = True
-                combineFeature = combineFeatures.add(combineInput)
-                tabBodies = [body for body in combineFeature.bodies if body.faces != binBody.faces]
-                tabMainBody = max([body for body in tabBodies], key=lambda x: x.edges.count)
-                bodiesToRemove = [body for body in tabBodies if body is not tabMainBody]
-                for body in bodiesToRemove:
-                    gridfinityBinComponent.features.removeFeatures.add(body)
-                combineUtils.joinBodies(binBody, commonUtils.objectCollectionFromList([tabMainBody]), gridfinityBinComponent)
+                # Trim the tab to the bin's outline with an intersect, which always leaves one body.
+                # Cutting it with the bin instead leaves slivers where the tab pokes out of the
+                # rounded outer corners; whether they exist depends on the tab position, so a feature
+                # removing them breaks when tab_offset_u / tab_length_u change. The outline is inset
+                # by half the shell thickness so the trimmed faces end inside the wall and merge
+                # away on join.
+                clipInset = (binBodyInput.wallThickness - xyClearance) / 2
+                tabClipHeight = tabOriginPoint.z
+                tabClipBox = extrudeUtils.createBoxAtPoint(
+                    binBodyInput.binWidth * binBodyInput.baseWidth - xyClearance * 2 - clipInset * 2,
+                    binBodyInput.binLength * binBodyInput.baseLength - xyClearance * 2 - clipInset * 2,
+                    tabClipHeight,
+                    gridfinityBinComponent,
+                    DimPoint(clipInset, clipInset, 0),
+                )
+                tabClipBox.name = 'Label tab clip box'
+                filletUtils.filletEdgesByLength(
+                    tabClipBox.faces,
+                    binBodyInput.binCornerFilletRadius - clipInset,
+                    tabClipHeight,
+                    gridfinityBinComponent,
+                ).name = 'Label tab clip box corners'
+                intersectInput = combineFeatures.createInput(tabBody, commonUtils.objectCollectionFromList(tabClipBox.bodies))
+                intersectInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
+                combineFeatures.add(intersectInput)
+                combineUtils.joinBodies(binBody, commonUtils.objectCollectionFromList([tabBody]), gridfinityBinComponent)
 
         # group features in timeline
         binGroup = des.timeline.timelineGroups.add(originalTimelineCount, des.timeline.count - 1)

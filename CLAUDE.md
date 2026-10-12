@@ -61,6 +61,11 @@ model. Plan: `docs/PARAMETRIC_PLAN.md`. Progress log (update after every milesto
   the component's own Z axis. A free move (`defineAsFreeMove(matrix)`) is not parametric.
 - In-Fusion test scripts must close their scratch documents in a `finally` (the harness tracks them
   in `CREATED_DOCUMENTS`); a crashed run once left 15 Untitled documents open next to Dave's work.
+- The fusion MCP call times out after a few minutes but the script **keeps running** inside Fusion,
+  and because the harness calls `adsk.doEvents()` the next MCP request runs *interleaved* with it
+  (its output arrives with that later call). Run one test group per MCP call (~30 bins max), and
+  after a timeout poll with a read-only script until `SUMMARY` appears — never run cleanup while
+  a timed-out run is still going.
 
 ## Conventions
 
