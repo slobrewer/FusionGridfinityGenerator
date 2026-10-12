@@ -2,7 +2,7 @@ import adsk.core, adsk.fusion, traceback
 import os
 
 from . import extrudeUtils, sketchUtils
-from .dim import toValueInput
+from .dim import toValueInput, applyExpression
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -22,35 +22,38 @@ def simpleCylinder(
     cylinderBaseSketch.name = "Simple cylinder sketch"
     dimensions: adsk.fusion.SketchDimensions = cylinderBaseSketch.sketchDimensions
     constraints: adsk.fusion.GeometricConstraints = cylinderBaseSketch.geometricConstraints
-    centerOnSketch = cylinderBaseSketch.modelToSketchSpace(centerBottom)
-    centerOnSketch.z = 0
+    centerOnSketch = sketchUtils.modelToSketch(cylinderBaseSketch, centerBottom)
+    centerPoint = adsk.core.Point3D.create(float(centerOnSketch.x), float(centerOnSketch.y), 0)
 
     circle = cylinderBaseSketch.sketchCurves.sketchCircles.addByCenterRadius(
-        centerOnSketch,
-        radius,
+        centerPoint,
+        float(radius),
     )
-    dimensions.addDiameterDimension(
+    diameterDimension = dimensions.addDiameterDimension(
         circle,
         adsk.core.Point3D.create(circle.centerSketchPoint.geometry.x + 1, circle.centerSketchPoint.geometry.y + 1, 0),
         True,
     )
-    if centerOnSketch.isEqualTo(cylinderBaseSketch.originPoint.geometry):
+    applyExpression(diameterDimension, radius * 2)
+    if centerPoint.isEqualTo(cylinderBaseSketch.originPoint.geometry):
         constraints.addCoincident(cylinderBaseSketch.originPoint, circle.centerSketchPoint)
     else:
-        dimensions.addDistanceDimension(
+        centerXDimension = dimensions.addDistanceDimension(
             cylinderBaseSketch.originPoint,
             circle.centerSketchPoint,
             adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation,
             adsk.core.Point3D.create(circle.centerSketchPoint.geometry.x, 0, 0),
             True
         )
-        dimensions.addDistanceDimension(
+        centerYDimension = dimensions.addDistanceDimension(
             cylinderBaseSketch.originPoint,
             circle.centerSketchPoint,
             adsk.fusion.DimensionOrientations.VerticalDimensionOrientation,
             adsk.core.Point3D.create(0, circle.centerSketchPoint.geometry.y, 0),
             True
         )
+        applyExpression(centerXDimension, centerOnSketch.x)
+        applyExpression(centerYDimension, centerOnSketch.y)
     
     cylinderExtrude = extrudeUtils.simpleDistanceExtrude(
         cylinderBaseSketch.profiles.item(0),
@@ -83,9 +86,7 @@ def simpleBox(
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     recSketch: adsk.fusion.Sketch = sketches.add(boxConstructionPlane)
     recSketch.name = "Simple box sketch"
-    startPointOnSketch = recSketch.modelToSketchSpace(originPoint)
-    startPointOnSketch.z = 0
-    sketchUtils.createRectangle(width, length, startPointOnSketch, recSketch)
+    sketchUtils.createRectangle(width, length, sketchUtils.modelToSketch(recSketch, originPoint), recSketch)
         
     # extrude
     extrude = extrudeFeatures.addSimple(recSketch.profiles.item(0),

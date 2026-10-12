@@ -4,14 +4,14 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
 
 ## Status
 
-| Milestone | State | Notes |
-|---|---|---|
-| M0 Scaffolding | done 2026-10-11 | `dim.py` + unit tests, `binParameters.py`, 29 `gfbN_*` params (always created) |
-| M1 Height chain | done 2026-10-11 | `bin_height_u`, `height_unit` live; verified in Fusion (12/12) |
-| M2 Footprint scalars | not started | |
-| M3 Feature scalars | not started | |
-| M4 X/Y count (feature pattern) | not started | |
-| M5 Baseplate | not started | |
+| Milestone | State | Branch / PR | Notes |
+|---|---|---|---|
+| M0 Scaffolding | done 2026-10-11 | `parametric-user-parameters`, PR #1 | `dim.py` + unit tests, `binParameters.py`, 29 `gfbN_*` params (always created) |
+| M1 Height chain | done 2026-10-11 | `parametric-user-parameters`, PR #1 | `bin_height_u`, `height_unit` live |
+| M2 Footprint scalars | done 2026-10-11 | `parametric-m2`, PR #2 | `base_width`, `base_length`, `xy_clearance`, `wall_thickness` live |
+| M3 Feature scalars | not started | | |
+| M4 X/Y count (feature pattern) | not started | | |
+| M5 Baseplate | not started | | |
 
 ## How to test
 
@@ -22,9 +22,11 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
   def run(_context: str):
       runpy.run_path('/Users/dlouw/Developer/FusionGridfinityGenerator/tests/fusion/bin_parameters_test.py')['run'](_context)
   ```
+  or `['runSuite'](['footprint'])` for named groups (`height`, `footprint`, `prefix`, …).
   It imports the repo's real `generateBin()` fresh (purges cached modules), drives it with stub
   dialog inputs in scratch documents, edits parameters, and checks health, height, body count and
-  **edited-vs-freshly-created equivalence (volume + face count)**. Scratch docs are closed at the end.
+  **edited-vs-freshly-created equivalence (volume + face count + bounding box; the edit must
+  change the model)**. Scratch docs are always closed (`finally`).
   Add a case there for every new live parameter.
 
 ## Lessons (also folded into the plan / CLAUDE.md)
@@ -37,6 +39,16 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
   plain-value path (still used by the baseplate) is unchanged from upstream.
 - Compartments whose requested depth is >= the bin's full depth now follow the bin height
   (`binBodyGenerator`); shallower custom compartments use `min(full depth; requested)`.
+- Sketch frames: sketches on offset origin planes and planar faces have their origin at the
+  projected model origin and axes along +/- model axes, so `sketchUtils.modelToSketch()` maps a
+  `DimPoint` straight to sketch coordinates with expressions (sign flips only).
+- `defineAsRotate` needs the axis as a proxy in the active occurrence (`createForAssemblyContext`),
+  otherwise `3 : Invalid entity`. The magnet groove now rotates about a parametric axis through the
+  hole centre instead of a fixed-point free move.
+- A crashed in-Fusion run left 15 scratch documents open; the harness now tracks and closes them
+  in a `finally`.
+- Known limit (M2): `wall_thickness` above the lip wall (2.15 mm) does not add/remove the lip
+  bottom chamfer that thinner walls get at creation time — that is a create-time branch.
 
 ## Log
 
@@ -48,14 +60,18 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
 - 2026-10-11 — Removed the "Store settings as user parameters" checkbox at Dave's request:
   parameters are always created. Dropped the parameters-off test case (11 checks remain).
 - 2026-10-11 — Dave demoed M1 by hand in the dialog (reloaded add-in, no checkbox): height change
-  via Change Parameters worked. In-Fusion suite not yet re-run after the checkbox removal.
+  via Change Parameters worked. Suite re-run after the checkbox removal: 11/11. PR #1 opened.
+- 2026-10-11 — M2 implemented: `createRectangle` / `simpleCylinder` / circle sketches link their
+  size and position dimensions; base and lip-notch pattern spacing, mid planes, clearance cut,
+  fillet/chamfer radii and shell thickness take expressions. In Fusion: 27/27 (16 new footprint
+  equivalences: base 40x45, wall 1.6 and 0.8, xy 0.5 on full / shelled+tab / solid / no-lip bins).
 
 ## Current state / next step
 
-Demo-able: create a bin with the dialog, then Modify > Change Parameters > `gfb1_bin_height_u`
-5 → 3 (or `gfb1_height_unit`). Not yet verified by hand: the dialog itself (saved
-defaults) and that preview ("Update preview once") does not leave extra `gfbN_` parameters behind.
+Demo-able: create a bin with the dialog, then Modify > Change Parameters > `gfb1_bin_height_u`,
+`gfb1_height_unit`, `gfb1_base_width` / `gfb1_base_length`, `gfb1_wall_thickness`,
+`gfb1_xy_clearance`. Not yet verified by hand: that preview ("Update preview once") does not
+leave extra `gfbN_` parameters behind.
 
-Next step: M2 — footprint scalars (`base_width`, `base_length`, `xy_clearance`, `wall_thickness`).
-These go through sketch dimensions (`sketchUtils.createRectangle` needs `applyExpression` on its
-4 dimensions with a `DimPoint` start point) and `cutBaseClearance`/base pattern spacing.
+Next step: M3 — feature scalars (screw/magnet diameter, magnet depth, tab length/width/offset/angle,
+scoop radius).

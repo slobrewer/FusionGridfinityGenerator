@@ -6,6 +6,7 @@ from ...lib import fusion360utils as futil
 from . import const, combineUtils, faceUtils, commonUtils, sketchUtils, extrudeUtils, baseGenerator, edgeUtils, filletUtils, geometryUtils
 from .baseGeneratorInput import BaseGeneratorInput
 from .binBodyLipGeneratorInput import BinBodyLipGeneratorInput
+from .dim import toValueInput
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -76,11 +77,11 @@ def createGridfinityBinBodyLip(
         patternInput = features.rectangularPatternFeatures.createInput(patternInputBodies,
             targetComponent.xConstructionAxis,
             adsk.core.ValueInput.createByReal(input.binWidth),
-            adsk.core.ValueInput.createByReal(input.baseWidth),
+            toValueInput(input.baseWidth),
             adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
         patternInput.directionTwoEntity = targetComponent.yConstructionAxis
         patternInput.quantityTwo = adsk.core.ValueInput.createByReal(input.binLength)
-        patternInput.distanceTwo = adsk.core.ValueInput.createByReal(input.baseLength)
+        patternInput.distanceTwo = toValueInput(input.baseLength)
         rectangularPattern = features.rectangularPatternFeatures.add(patternInput)
         lipCutoutBodies = lipCutoutBodies + list(rectangularPattern.bodies)
 

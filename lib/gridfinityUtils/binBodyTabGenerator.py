@@ -82,9 +82,11 @@ def createGridfinityBinBodyTab(
         True
         )
 
-    # link the tab's top edge height to the bin height; pick whichever sketch axis is model Z
+    # link the tab's top edge height and its y position; the sketch lies in the YZ plane and
+    # either of its axes can be model Z
     sketchXIsModelZ = abs(tabSketch.xDirection.z) > 0.5
     applyExpression(originHorizontalDimension if sketchXIsModelZ else originVerticalDimension, tabTopEdgeHeight)
+    applyExpression(originVerticalDimension if sketchXIsModelZ else originHorizontalDimension, input.origin.y)
 
     dimensions.addDistanceDimension(
         line2.startSketchPoint,

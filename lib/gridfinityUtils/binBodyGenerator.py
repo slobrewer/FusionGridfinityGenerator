@@ -14,7 +14,7 @@ from .binBodyTabGenerator import createGridfinityBinBodyTab
 from .binBodyLipGeneratorInput import BinBodyLipGeneratorInput
 from .binBodyLipGenerator import createGridfinityBinBodyLip
 from ... import config
-from .dim import DimPoint, dmax, dmin
+from .dim import DimPoint, dmax, dmin, toValueInput
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -71,7 +71,7 @@ def createGridfinityBinBody(
         lipBody = createGridfinityBinBodyLip(lipInput, targetComponent)
 
         if input.wallThickness < const.BIN_LIP_WALL_THICKNESS:
-            lipBottomChamferSize = max(const.BIN_BODY_CUTOUT_BOTTOM_FILLET_RADIUS, input.binCornerFilletRadius - input.wallThickness)
+            lipBottomChamferSize = dmax(const.BIN_BODY_CUTOUT_BOTTOM_FILLET_RADIUS, input.binCornerFilletRadius - input.wallThickness)
             lipBottomChamferExtrude = extrudeUtils.createBoxAtPoint(
                 actualBodyWidth - input.wallThickness * 2,
                 (actualBodyLength - input.wallThickness - const.BIN_LIP_WALL_THICKNESS + input.xyClearance) if input.hasScoop else (actualBodyLength - input.wallThickness * 2),
@@ -99,7 +99,7 @@ def createGridfinityBinBody(
             bottomLipChamferEdges = commonUtils.objectCollectionFromList(edgesToChamfer)
             bottomLipChamferInput.chamferEdgeSets.addEqualDistanceChamferEdgeSet(
                 bottomLipChamferEdges,
-                adsk.core.ValueInput.createByReal(lipBottomChamferSize),
+                toValueInput(lipBottomChamferSize),
                 False)
             chamferFeatures.add(bottomLipChamferInput)
             combineUtils.cutBody(lipBody, commonUtils.objectCollectionFromList(lipBottomChamferExtrude.bodies), targetComponent)
@@ -208,7 +208,7 @@ def createCompartmentCutout(
         targetComponent: adsk.fusion.Component,
     ) -> adsk.fusion.BRepBody:
 
-    innerCutoutFilletRadius = max(const.BIN_BODY_CUTOUT_BOTTOM_FILLET_RADIUS, cornerFilletRadius)
+    innerCutoutFilletRadius = dmax(const.BIN_BODY_CUTOUT_BOTTOM_FILLET_RADIUS, cornerFilletRadius)
     innerCutoutInput = BinBodyCutoutGeneratorInput()
     innerCutoutInput.origin = originPoint
     innerCutoutInput.width = width

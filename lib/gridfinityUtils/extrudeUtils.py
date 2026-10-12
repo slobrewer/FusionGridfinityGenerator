@@ -65,7 +65,7 @@ def createBoxAtPoint(
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     recSketch: adsk.fusion.Sketch = sketches.add(boxConstructionPlane)
     recSketch.name = 'Simple box at point sketch'
-    sketchUtils.createRectangle(width, length, recSketch.modelToSketchSpace(asPoint3D(originPoint)), recSketch)
+    sketchUtils.createRectangle(width, length, sketchUtils.modelToSketch(recSketch, originPoint), recSketch)
         
     # extrude
     extrude = extrudeFeatures.addSimple(recSketch.profiles.item(0),

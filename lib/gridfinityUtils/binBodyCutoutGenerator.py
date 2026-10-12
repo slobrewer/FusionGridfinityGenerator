@@ -38,7 +38,7 @@ def createGridfinityBinBodyCutout(
     sketchUtils.createRectangle(
         input.width,
         input.length,
-        adsk.core.Point3D.create(float(input.origin.x), float(input.origin.y), 0),
+        sketchUtils.modelToSketch(innerCutoutSketch, input.origin),
         innerCutoutSketch,
     )
 

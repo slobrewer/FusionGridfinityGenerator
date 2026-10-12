@@ -1,6 +1,8 @@
 import adsk.core, adsk.fusion, traceback
 import os
 
+from .dim import toValueInput
+
 
 def simpleShell(
     openFaces: list[adsk.fusion.BRepFace],
@@ -12,5 +14,5 @@ def simpleShell(
     for face in openFaces:
         shellBinObjects.add(face)
     shellBinInput = shellFeatures.createInput(shellBinObjects, False)
-    shellBinInput.insideThickness = adsk.core.ValueInput.createByReal(thickness)
+    shellBinInput.insideThickness = toValueInput(thickness)
     return shellFeatures.add(shellBinInput)
