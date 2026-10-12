@@ -6,6 +6,7 @@ from ...lib.gridfinityUtils.baseGeneratorInput import BaseGeneratorInput
 from . import sketchUtils, const, edgeUtils, commonUtils, combineUtils, faceUtils, extrudeUtils, shapeUtils, geometryUtils
 from ...lib import fusion360utils as futil
 from ... import config
+from .dim import toValueInput, asPoint3D
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -118,14 +119,14 @@ def createSingleGridfinityBaseBody(
     features: adsk.fusion.Features = targetComponent.features
     extrudeFeatures: adsk.fusion.ExtrudeFeatures = features.extrudeFeatures
     baseConstructionPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
-    baseConstructionPlaneInput.setByOffset(targetComponent.xYConstructionPlane, adsk.core.ValueInput.createByReal(input.originPoint.z))
+    baseConstructionPlaneInput.setByOffset(targetComponent.xYConstructionPlane, toValueInput(input.originPoint.z))
     baseConstructionPlane = targetComponent.constructionPlanes.add(baseConstructionPlaneInput)
     baseConstructionPlane.name = 'Base plate construction plane'
     # create rectangle for the base
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     basePlateSketch: adsk.fusion.Sketch = sketches.add(baseConstructionPlane)
     basePlateSketch.name = 'Base plate sketch'
-    createRectangle(actual_base_width, actual_base_length, basePlateSketch.modelToSketchSpace(input.originPoint), basePlateSketch)
+    createRectangle(actual_base_width, actual_base_length, basePlateSketch.modelToSketchSpace(asPoint3D(input.originPoint)), basePlateSketch)
 
     # extrude top section
     topSectionExtrudeDepth = adsk.core.ValueInput.createByReal(const.BIN_BASE_TOP_SECTION_HEIGH)

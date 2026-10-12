@@ -38,6 +38,15 @@ model. Plan: `docs/PARAMETRIC_PLAN.md`. Progress log (update after every milesto
 - Patterning **bodies** and combining later does not survive a quantity change; patterning
   **features** (incl. Combine) does. See plan §1.
 - Timeline must be on (design history); the add-in refuses Direct Design.
+- Timeline groups report `healthState == 5` with no message; check group members for health.
+- Tests: `python3 -m unittest discover -s tests` (plain Python) and
+  `tests/fusion/bin_parameters_test.py` run via the fusion MCP with `runpy.run_path(...)['run'](ctx)`
+  — see `docs/PARAMETRIC_PROGRESS.md`. Every new live parameter gets a case there, including an
+  edited-vs-fresh equivalence check (volume + face count).
+- How the parametric path works: generator inputs become `Dim` objects (`lib/gridfinityUtils/dim.py`)
+  that carry value + expression; utilities call `toValueInput()` / `applyExpression()`; points that
+  may hold Dims are `DimPoint`s (`asPoint3D()` where Fusion needs a Point3D). Use `dmax`/`dmin`,
+  never builtin `max`/`min`, on values that may be Dims.
 
 ## Conventions
 

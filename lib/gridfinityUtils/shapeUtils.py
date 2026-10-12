@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, traceback
 import os
 
 from . import extrudeUtils, sketchUtils
+from .dim import toValueInput
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -15,7 +16,7 @@ def simpleCylinder(
     targetComponent: adsk.fusion.Component,
 ):
     baseConstructionPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
-    baseConstructionPlaneInput.setByOffset(plane, adsk.core.ValueInput.createByReal(planeOffset))
+    baseConstructionPlaneInput.setByOffset(plane, toValueInput(planeOffset))
     baseConstructionPlane = targetComponent.constructionPlanes.add(baseConstructionPlaneInput)
     cylinderBaseSketch: adsk.fusion.Sketch = targetComponent.sketches.add(baseConstructionPlane)
     cylinderBaseSketch.name = "Simple cylinder sketch"
@@ -76,7 +77,7 @@ def simpleBox(
     boxPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
     boxPlaneInput.setByOffset(
         plane,
-        adsk.core.ValueInput.createByReal(planeOffset)
+        toValueInput(planeOffset)
     )
     boxConstructionPlane = targetComponent.constructionPlanes.add(boxPlaneInput)
     sketches: adsk.fusion.Sketches = targetComponent.sketches
@@ -88,7 +89,7 @@ def simpleBox(
         
     # extrude
     extrude = extrudeFeatures.addSimple(recSketch.profiles.item(0),
-        adsk.core.ValueInput.createByReal(height),
+        toValueInput(height),
         adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
     extrude.name = "Simple box extrude"
     return extrude.bodies.item(0)

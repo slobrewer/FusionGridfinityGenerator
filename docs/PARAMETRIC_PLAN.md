@@ -90,11 +90,11 @@ it does nothing (documented in the comment: `(informational)`).
 |---|---|---|---|
 | `base_width` | mm | Base width unit | M2 |
 | `base_length` | mm | Base length unit | M2 |
-| `height_unit` | mm | Bin height unit | M1 |
+| `height_unit` | mm | Bin height unit | M1 ✅ |
 | `xy_clearance` | mm | Bin xy clearance | M2 |
 | `bin_width_u` | – | Bin width X (u) | M4 (Info until then) |
 | `bin_length_u` | – | Bin length Y (u) | M4 (Info until then) |
-| `bin_height_u` | – | Bin height Z (u) | M1 |
+| `bin_height_u` | – | Bin height Z (u) | M1 ✅ |
 | `wall_thickness` | mm | Bin wall thickness | M2 |
 | `screw_diameter` | mm | Screw hole diameter | M3 |
 | `magnet_diameter` | mm | Magnet cutout diameter | M3 |
