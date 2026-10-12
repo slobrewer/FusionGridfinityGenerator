@@ -47,6 +47,8 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
   4 equivalence cases, parameters-off regression, gfb1/gfb2 prefixes).
 - 2026-10-11 — Removed the "Store settings as user parameters" checkbox at Dave's request:
   parameters are always created. Dropped the parameters-off test case (11 checks remain).
+- 2026-10-11 — Dave demoed M1 by hand in the dialog (reloaded add-in, no checkbox): height change
+  via Change Parameters worked. In-Fusion suite not yet re-run after the checkbox removal.
 
 ## Current state / next step
 
