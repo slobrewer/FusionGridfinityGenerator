@@ -265,6 +265,93 @@ def featuresGroup(entry, app):
         results.append(equivalenceCase(entry, app, label, changes, finalOverrides, **overrides)[1])
     return results
 
+def countGroup(entry, app):
+    """M4: bin X/Y count, through feature patterns of the base (and of the lip notches)."""
+    results = []
+    shelledTab = dict(bin_type=entry.BIN_TYPE_SHELLED, tab=True)
+    checks = [
+        ('2x3 -> 3x2 (default)', [('bin_width_u', '3'), ('bin_length_u', '2')], dict(width_u=3, length_u=2), {}),
+        ('2x3 -> 3x4 (full)', [('bin_width_u', '3'), ('bin_length_u', '4')], dict(width_u=3, length_u=4), FULL),
+        ('2x3 -> 1x1 (full)', [('bin_width_u', '1'), ('bin_length_u', '1')], dict(width_u=1, length_u=1), FULL),
+        ('1x1 -> 3x2 (full)', [('bin_width_u', '3'), ('bin_length_u', '2')], dict(width_u=3, length_u=2), dict(FULL, width_u=1, length_u=1)),
+        ('2x3 -> 4x3 (shelled + tab)', [('bin_width_u', '4')], dict(width_u=4), shelledTab),
+        ('2x3 -> 2x1 (solid)', [('bin_length_u', '1')], dict(length_u=1), dict(bin_type=entry.BIN_TYPE_SOLID)),
+        ('2x3 -> 3x3 (no lip, scoop)', [('bin_width_u', '3')], dict(width_u=3), dict(lip=False, scoop=True)),
+        ('2x3 -> 1x2, tab 2u stays inside (scoop + tab)', [('bin_width_u', '1'), ('bin_length_u', '2')], dict(width_u=1, length_u=2),
+         dict(scoop=True, tab=True, tab_length=2)),
+        ('body only: 2x3 -> 3x2, height 5 -> 4 (tab)', [('bin_width_u', '3'), ('bin_length_u', '2'), ('bin_height_u', '4')],
+         dict(width_u=3, length_u=2, height_u=4), dict(generate_base=False, tab=True)),
+    ]
+    for label, changes, finalOverrides, overrides in checks:
+        results.append(equivalenceCase(entry, app, label, changes, finalOverrides, **overrides)[1])
+    # a base-only bin keeps upstream's pattern of separate base bodies: the count is recorded only
+    newDocument(app)
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    args = types.SimpleNamespace(command=types.SimpleNamespace(commandInputs=dialogInputs(entry, generate_body=False)), executeFailed=False, executeFailedMessage='')
+    entry.generateBin(args)
+    comment = design.userParameters.itemByName('gfb1_bin_width_u').comment
+    passed = 'info only' in comment and 'info only' not in design.userParameters.itemByName('gfb1_bin_height_u').comment
+    print(f'[{"PASS" if passed else "FAIL"}] base only: bin count marked info only ({comment})')
+    results.append(passed)
+    return results
+
+STRESS_MIXES = [
+    ('full without scoop, 1 compartment', dict(FULL, scoop=False, compartments_x=1, compartments_y=1)),
+    ('full without scoop, 2x2 compartments', dict(FULL, scoop=False)),
+    ('magnets + screws', dict(magnets=True, screw_holes=True)),
+    ('shelled + tab + magnets', dict(bin_type='shelled', tab=True, magnets=True, magnet_tabs=True)),
+    ('solid + notches + screws', dict(bin_type='solid', lip_notches=True, screw_holes=True)),
+    ('scoop + tab + magnets, 1 compartment', dict(scoop=True, tab=True, magnets=True, screw_holes=True)),
+]
+
+def generateShape(module, entry, app, overrides):
+    newDocument(app)
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    args = types.SimpleNamespace(command=types.SimpleNamespace(commandInputs=dialogInputs(entry, **overrides)), executeFailed=False, executeFailedMessage='')
+    ok = module.generateBin(args)
+    message = str(args.executeFailedMessage)
+    return design, ok, message.split('//')[1][:80] if '//' in message else message[:120]
+
+def stressGroup(entry, app, mixNames=None, sizes=None):
+    """Feature-pattern failures in Fusion depend on size and feature mix (a 5x5 full bin failed
+    while 4x4 and 5x5 without the scoop worked; one copy of a magnet groove silently went missing
+    in a 4x1 bin), so sweep sizes x mixes. Each created bin must match the App Store build (mixes
+    without a scoop), and after a count change it must match a bin created at the new size."""
+    upstream = findUpstreamEntry()
+    typeNames = {'shelled': entry.BIN_TYPE_SHELLED, 'solid': entry.BIN_TYPE_SOLID}
+    results = []
+    sizes = sizes or [(1, 1), (2, 1), (3, 3), (4, 2), (5, 5), (6, 3)]
+    for mixName, mixSpec in [m for m in STRESS_MIXES if mixNames is None or m[0] in mixNames]:
+        mix = dict(mixSpec)
+        if 'bin_type' in mix:
+            mix['bin_type'] = typeNames[mix['bin_type']]
+        for width, length in sizes:
+            failures = []
+            overrides = dict(mix, width_u=width, length_u=length)
+            design, ok, message = generateShape(entry, entry, app, overrides)
+            if not ok:
+                failures.append('create: ' + message)
+            else:
+                # edit while this bin's document is the active one, compare afterwards
+                created = shape(design)
+                newWidth, newLength = width + 1, max(1, length - 1)
+                for suffix, expression in (('bin_width_u', str(newWidth)), ('bin_length_u', str(newLength))):
+                    design.userParameters.itemByName('gfb1_' + suffix).expression = expression
+                adsk.doEvents()
+                bad = unhealthy(design)
+                edited = shape(design)
+                if upstream is not None and not mix.get('scoop'):
+                    upstreamDesign, upstreamOk, _ = generateShape(upstream, entry, app, overrides)
+                    if upstreamOk and shape(upstreamDesign) != created:
+                        failures.append(f'create differs from upstream: {created} vs {shape(upstreamDesign)}')
+                fresh, freshOk, _ = generateShape(entry, entry, app, dict(mix, width_u=newWidth, length_u=newLength))
+                if bad or len(allBodies(design)) != 1 or not freshOk or shape(fresh) != edited:
+                    failures.append(f'after {newWidth}x{newLength}: bodies={len(allBodies(design))} {bad[:2]} edited={edited} fresh={shape(fresh) if freshOk else "failed"}')
+            closeCreatedDocuments()
+            print(f'[{"FAIL" if failures else "PASS"}] {mixName} {width}x{length}' + ('' if not failures else ': ' + '; '.join(failures)))
+            results.append(not failures)
+    return results
+
 def prefixGroup(entry, app):
     newDocument(app)
     design = adsk.fusion.Design.cast(app.activeProduct)
@@ -298,6 +385,10 @@ def upstreamGroup(entry, app):
         ('shelled + tab', dict(bin_type=entry.BIN_TYPE_SHELLED, tab=True)),
         ('solid', dict(bin_type=entry.BIN_TYPE_SOLID)),
         ('no lip, 40 x 45 base, wall 1.6, xy 0.5', dict(lip=False, base_width=4.0, base_length=4.5, wall=0.16, xy_clearance=0.05)),
+        ('1x1 tab, notches, magnets + tabs, screws', dict(FULL, scoop=False, width_u=1, length_u=1, compartments_x=1, compartments_y=1)),
+        ('4x1 notches, magnets, screws', dict(width_u=4, length_u=1, lip_notches=True, magnets=True, screw_holes=True)),
+        ('base only, magnets + screws', dict(generate_body=False, magnets=True, screw_holes=True)),
+        ('body only, tab, scoop', dict(generate_base=False, tab=True)),
     ]
     for label, overrides in mixes:
         shapes = []
@@ -319,6 +410,8 @@ GROUPS = {
     'height': heightGroup,
     'footprint': footprintGroup,
     'features': featuresGroup,
+    'count': countGroup,
+    'stress': stressGroup,
     'prefix': prefixGroup,
 }
 

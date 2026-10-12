@@ -11,26 +11,6 @@ from .dim import toValueInput, asPoint3D, applyExpression, isParametric, DimPoin
 app = adsk.core.Application.get()
 ui = app.userInterface
 
-def createVerticalAxis(x, y, name: str, targetComponent: adsk.fusion.Component):
-    """Hidden construction axis parallel to Z through (x, y); follows x/y when they are Dims."""
-    planes = targetComponent.constructionPlanes
-    xzPlaneInput = planes.createInput()
-    xzPlaneInput.setByOffset(targetComponent.xZConstructionPlane, toValueInput(y))
-    xzPlane = planes.add(xzPlaneInput)
-    xzPlane.name = f"{name} XZ plane"
-    xzPlane.isLightBulbOn = False
-    yzPlaneInput = planes.createInput()
-    yzPlaneInput.setByOffset(targetComponent.yZConstructionPlane, toValueInput(x))
-    yzPlane = planes.add(yzPlaneInput)
-    yzPlane.name = f"{name} YZ plane"
-    yzPlane.isLightBulbOn = False
-    axisInput = targetComponent.constructionAxes.createInput()
-    axisInput.setByTwoPlanes(xzPlane, yzPlane)
-    axis = targetComponent.constructionAxes.add(axisInput)
-    axis.name = f"{name} axis"
-    axis.isLightBulbOn = False
-    return axis
-
 def createCircleAtPointSketch(
     plane: adsk.core.Base,
     radius: float,
@@ -135,85 +115,231 @@ def createTabAtCircleEdgeSketch(
 
     return circleSketch
 
+INVERSE_SQRT2 = 1 / math.sqrt(2)
+
+def rotatedByMinus45(center: DimPoint, u, v) -> DimPoint:
+    """center + (u, v) rotated by -45 degrees about +Z (u, v may be Dims)."""
+    return DimPoint(center.x + (u + v) * INVERSE_SQRT2, center.y + (v - u) * INVERSE_SQRT2, 0)
+
+def createGrooveLayer(
+    plane: adsk.core.Base,
+    planeOffset,
+    height,
+    outline: list,
+    clipRadius,
+    center: DimPoint,
+    targetComponent: adsk.fusion.Component,
+    cutFrom: adsk.fusion.BRepBody = None,
+):
+    """Prism from the polygon `outline` (model points), optionally clipped by a circle of
+    `clipRadius` around `center`, sketched on `plane` offset by `planeOffset`. A new body, or with
+    `cutFrom` a cut from that body (returns the feature)."""
+    planeInput = targetComponent.constructionPlanes.createInput()
+    planeInput.setByOffset(plane, toValueInput(planeOffset))
+    layerPlane = targetComponent.constructionPlanes.add(planeInput)
+    layerPlane.isLightBulbOn = False
+    sketch: adsk.fusion.Sketch = targetComponent.sketches.add(layerPlane)
+    sketch.name = 'Magnet groove layer sketch'
+    sketchUtils.createPolygon([sketchUtils.modelToSketch(sketch, point) for point in outline], sketch)
+    if clipRadius is not None:
+        centerOnSketch = sketchUtils.modelToSketch(sketch, center)
+        circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
+            adsk.core.Point3D.create(float(centerOnSketch.x), float(centerOnSketch.y), 0),
+            float(clipRadius),
+        )
+        dimensions = sketch.sketchDimensions
+        applyExpression(dimensions.addDiameterDimension(circle, adsk.core.Point3D.create(circle.centerSketchPoint.geometry.x + 1, circle.centerSketchPoint.geometry.y + 1, 0), True), clipRadius * 2)
+        applyExpression(dimensions.addDistanceDimension(sketch.originPoint, circle.centerSketchPoint,
+            adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation, adsk.core.Point3D.create(circle.centerSketchPoint.geometry.x, 0, 0), True), centerOnSketch.x)
+        applyExpression(dimensions.addDistanceDimension(sketch.originPoint, circle.centerSketchPoint,
+            adsk.fusion.DimensionOrientations.VerticalDimensionOrientation, adsk.core.Point3D.create(0, circle.centerSketchPoint.geometry.y, 0), True), centerOnSketch.y)
+    def arcCount(profile):
+        return sum(1 for curve in profile.profileLoops.item(0).profileCurves if curve.geometry.objectType == adsk.core.Arc3D.classType())
+    # clipped: the region bounded by both strip edges and both arcs; unclipped: the only profile
+    profile = max(sketch.profiles, key=arcCount) if clipRadius is not None else sketch.profiles.item(0)
+    extrudeFeatures = targetComponent.features.extrudeFeatures
+    if cutFrom is not None:
+        extrudeInput = extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        extrudeInput.setDistanceExtent(False, toValueInput(height))
+        extrudeInput.participantBodies = [cutFrom]
+        extrude = extrudeFeatures.add(extrudeInput)
+        extrude.name = 'Magnet groove layer'
+        return extrude
+    extrude = extrudeFeatures.addSimple(profile, toValueInput(height), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    extrude.name = 'Magnet groove layer'
+    return extrude.bodies.item(0)
+
+def taperedSectionExtrude(
+    plane: adsk.core.Base,
+    width,
+    length,
+    startPoint: DimPoint,
+    cornerRadius,
+    depth: float,
+    taper: bool,
+    targetBody: adsk.fusion.BRepBody,
+    targetComponent: adsk.fusion.Component,
+    name: str,
+) -> adsk.fusion.ExtrudeFeature:
+    """Rounded rectangle on `plane` extruded `depth` downwards into `targetBody`; with `taper` the
+    sides lean inwards at 45 degrees (what a 45 degree equal-distance chamfer of that depth gives)."""
+    sketch: adsk.fusion.Sketch = targetComponent.sketches.add(plane)
+    sketch.name = name + ' sketch'
+    sketchUtils.createRoundedRectangle(width, length, sketchUtils.modelToSketch(sketch, startPoint), cornerRadius, sketch)
+    extrudeInput = targetComponent.features.extrudeFeatures.createInput(sketch.profiles.item(0), adsk.fusion.FeatureOperations.JoinFeatureOperation)
+    extrudeInput.setOneSideExtent(
+        adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(depth)),
+        adsk.fusion.ExtentDirections.NegativeExtentDirection,
+        adsk.core.ValueInput.createByString('-45 deg' if taper else '0 deg'),
+    )
+    extrudeInput.participantBodies = [targetBody]
+    extrude = targetComponent.features.extrudeFeatures.add(extrudeInput)
+    extrude.name = name
+    return extrude
+
+def offsetXYPlane(z, name: str, targetComponent: adsk.fusion.Component):
+    planeInput = targetComponent.constructionPlanes.createInput()
+    planeInput.setByOffset(targetComponent.xYConstructionPlane, toValueInput(z))
+    plane = targetComponent.constructionPlanes.add(planeInput)
+    plane.name = name
+    plane.isLightBulbOn = False
+    return plane
+
+def createTaperedBaseInto(
+    input: BaseGeneratorInput,
+    targetBody: adsk.fusion.BRepBody,
+    targetComponent: adsk.fusion.Component,
+) -> adsk.fusion.ExtrudeFeature:
+    """The gridfinity base profile built inside `targetBody`: top section tapered 45 degrees,
+    straight mid section, bottom section tapered 45 degrees. Returns the lowest extrude."""
+    origin = input.originPoint
+    top = const.BIN_BASE_TOP_SECTION_HEIGH
+    mid = const.BIN_BASE_MID_SECTION_HEIGH
+    bottom = const.BIN_BASE_BOTTOM_SECTION_HEIGH
+    taperedSectionExtrude(
+        offsetXYPlane(origin.z, 'Base top section plane', targetComponent),
+        input.baseWidth, input.baseLength, DimPoint(origin.x, origin.y, 0), input.cornerFilletRadius,
+        top, True, targetBody, targetComponent, 'Base top section extrude')
+    # the top section ends inset by its own height on every side
+    lowerPlane = offsetXYPlane(origin.z - top, 'Base mid section plane', targetComponent)
+    lowerArguments = (input.baseWidth - top * 2, input.baseLength - top * 2, DimPoint(origin.x + top, origin.y + top, 0), input.cornerFilletRadius - top)
+    if not input.hasBottomChamfer:
+        return taperedSectionExtrude(lowerPlane, *lowerArguments, mid + bottom, False, targetBody, targetComponent, 'Base mid section extrude')
+    taperedSectionExtrude(lowerPlane, *lowerArguments, mid, False, targetBody, targetComponent, 'Base mid section extrude')
+    return taperedSectionExtrude(
+        offsetXYPlane(origin.z - top - mid, 'Base bottom section plane', targetComponent),
+        *lowerArguments, bottom, True, targetBody, targetComponent, 'Base bottom section extrude')
+
 def createSingleGridfinityBaseBody(
     input: BaseGeneratorInput,
     targetComponent: adsk.fusion.Component,
+    combineInto: adsk.fusion.BRepBody = None,
+    combine=None,
 ):
+    """One gridfinity base. With `combineInto`, the base is combined into that body (`combine`,
+    e.g. combineUtils.joinBodies) before its screw/magnet holes are cut from that body, so that every
+    feature can be repeated by a feature pattern (see createBaseFeaturePattern)."""
     actual_base_width = input.baseWidth
     actual_base_length = input.baseLength
     features: adsk.fusion.Features = targetComponent.features
     extrudeFeatures: adsk.fusion.ExtrudeFeatures = features.extrudeFeatures
-    baseConstructionPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
-    baseConstructionPlaneInput.setByOffset(targetComponent.xYConstructionPlane, toValueInput(input.originPoint.z))
-    baseConstructionPlane = targetComponent.constructionPlanes.add(baseConstructionPlaneInput)
-    baseConstructionPlane.name = 'Base plate construction plane'
-    # create rectangle for the base
-    sketches: adsk.fusion.Sketches = targetComponent.sketches
-    basePlateSketch: adsk.fusion.Sketch = sketches.add(baseConstructionPlane)
-    basePlateSketch.name = 'Base plate sketch'
-    createRectangle(actual_base_width, actual_base_length, sketchUtils.modelToSketch(basePlateSketch, input.originPoint), basePlateSketch)
+    # When joining into another body, build the base straight into that body from sketches, with
+    # tapered extrudes in place of the corner fillet and 45 degree chamfers (same shape). A feature
+    # pattern of these features then creates no bodies and has no fillet/chamfer: new bodies inside
+    # a feature pattern lose track of their targets in some copies (MULTIPLE_TARGET_ERROR, "All
+    # tool bodies are lost"), and fillets/chamfers fail where neighbouring bases meet.
+    joinEarly = combineInto is not None and combine is combineUtils.joinBodies
+    if joinEarly:
+        baseBody = combineInto
+        baseBottomExtrude = createTaperedBaseInto(input, combineInto, targetComponent)
+    else:
+        baseConstructionPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
+        baseConstructionPlaneInput.setByOffset(targetComponent.xYConstructionPlane, toValueInput(input.originPoint.z))
+        baseConstructionPlane = targetComponent.constructionPlanes.add(baseConstructionPlaneInput)
+        baseConstructionPlane.name = 'Base plate construction plane'
+        # create rectangle for the base
+        sketches: adsk.fusion.Sketches = targetComponent.sketches
+        basePlateSketch: adsk.fusion.Sketch = sketches.add(baseConstructionPlane)
+        basePlateSketch.name = 'Base plate sketch'
+        createRectangle(actual_base_width, actual_base_length, sketchUtils.modelToSketch(basePlateSketch, input.originPoint), basePlateSketch)
 
-    # extrude top section
-    topSectionExtrudeDepth = adsk.core.ValueInput.createByReal(const.BIN_BASE_TOP_SECTION_HEIGH)
-    topSectionExtrudeInput = extrudeFeatures.createInput(basePlateSketch.profiles.item(0),
-        adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-    topSectionExtrudeExtent = adsk.fusion.DistanceExtentDefinition.create(topSectionExtrudeDepth)
-    topSectionExtrudeInput.setOneSideExtent(topSectionExtrudeExtent,
-        adsk.fusion.ExtentDirections.NegativeExtentDirection,
-        adsk.core.ValueInput.createByReal(0))
-    topSectionExtrudeFeature = extrudeFeatures.add(topSectionExtrudeInput)
-    topSectionExtrudeFeature.name = 'Base top section extrude'
-    baseBody = topSectionExtrudeFeature.bodies.item(0)
-    baseBody.name = 'Base'
+        # extrude top section
+        topSectionExtrudeDepth = adsk.core.ValueInput.createByReal(const.BIN_BASE_TOP_SECTION_HEIGH)
+        topSectionExtrudeInput = extrudeFeatures.createInput(basePlateSketch.profiles.item(0),
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        topSectionExtrudeExtent = adsk.fusion.DistanceExtentDefinition.create(topSectionExtrudeDepth)
+        topSectionExtrudeInput.setOneSideExtent(topSectionExtrudeExtent,
+            adsk.fusion.ExtentDirections.NegativeExtentDirection,
+            adsk.core.ValueInput.createByReal(0))
+        topSectionExtrudeFeature = extrudeFeatures.add(topSectionExtrudeInput)
+        topSectionExtrudeFeature.name = 'Base top section extrude'
+        baseBody = topSectionExtrudeFeature.bodies.item(0)
+        baseBody.name = 'Base'
 
-    # fillet on corners
-    filletFeatures: adsk.fusion.FilletFeatures = features.filletFeatures
-    filletInput = filletFeatures.createInput()
-    filletInput.isRollingBallCorner = True
-    fillet_edges = edgeUtils.selectEdgesByLength(baseBody.faces, const.BIN_BASE_TOP_SECTION_HEIGH, const.DEFAULT_FILTER_TOLERANCE)
-    filletInput.edgeSetInputs.addConstantRadiusEdgeSet(fillet_edges, toValueInput(input.cornerFilletRadius), True)
-    filletFeatures.add(filletInput).name = 'Base corner fillet'
+        # fillet on corners
+        filletFeatures: adsk.fusion.FilletFeatures = features.filletFeatures
+        filletInput = filletFeatures.createInput()
+        filletInput.isRollingBallCorner = True
+        fillet_edges = edgeUtils.selectEdgesByLength(baseBody.faces, const.BIN_BASE_TOP_SECTION_HEIGH, const.DEFAULT_FILTER_TOLERANCE)
+        filletInput.edgeSetInputs.addConstantRadiusEdgeSet(fillet_edges, toValueInput(input.cornerFilletRadius), True)
+        filletFeatures.add(filletInput).name = 'Base corner fillet'
 
-    # chamfer top section
-    chamferFeatures: adsk.fusion.ChamferFeatures = features.chamferFeatures
-    chamferInput = chamferFeatures.createInput2()
-    chamfer_edges = adsk.core.ObjectCollection.create()
-    # use one edge for chamfer, the rest will be automatically detected with tangent chain condition
-    chamfer_edges.add(topSectionExtrudeFeature.endFaces.item(0).edges.item(0))
-    chamferInput.chamferEdgeSets.addEqualDistanceChamferEdgeSet(chamfer_edges,
-        topSectionExtrudeDepth,
-        True)
-    chamferFeatures.add(chamferInput)
-
-    # extrude mid/bottom section
-    baseBottomExtrude = extrudeUtils.simpleDistanceExtrude(
-        topSectionExtrudeFeature.endFaces.item(0),
-        adsk.fusion.FeatureOperations.JoinFeatureOperation,
-        const.BIN_BASE_MID_SECTION_HEIGH + const.BIN_BASE_BOTTOM_SECTION_HEIGH,
-        adsk.fusion.ExtentDirections.PositiveExtentDirection,
-        [baseBody],
-        targetComponent
-    )
-
-    if input.hasBottomChamfer:
-        # chamfer bottom section
+        # chamfer top section
         chamferFeatures: adsk.fusion.ChamferFeatures = features.chamferFeatures
         chamferInput = chamferFeatures.createInput2()
-        chamfer_edges = commonUtils.objectCollectionFromList(faceUtils.getBottomFace(baseBottomExtrude.bodies.item(0)).edges)
+        chamfer_edges = adsk.core.ObjectCollection.create()
+        # use one edge for chamfer, the rest will be automatically detected with tangent chain condition
+        chamfer_edges.add(topSectionExtrudeFeature.endFaces.item(0).edges.item(0))
         chamferInput.chamferEdgeSets.addEqualDistanceChamferEdgeSet(chamfer_edges,
-            adsk.core.ValueInput.createByReal(const.BIN_BASE_BOTTOM_SECTION_HEIGH),
+            topSectionExtrudeDepth,
             True)
         chamferFeatures.add(chamferInput)
-    
+
+        # extrude mid/bottom section
+        baseBottomExtrude = extrudeUtils.simpleDistanceExtrude(
+            topSectionExtrudeFeature.endFaces.item(0),
+            adsk.fusion.FeatureOperations.JoinFeatureOperation,
+            const.BIN_BASE_MID_SECTION_HEIGH + const.BIN_BASE_BOTTOM_SECTION_HEIGH,
+            adsk.fusion.ExtentDirections.PositiveExtentDirection,
+            [baseBody],
+            targetComponent
+        )
+
+        if input.hasBottomChamfer:
+            # chamfer bottom section
+            chamferFeatures: adsk.fusion.ChamferFeatures = features.chamferFeatures
+            chamferInput = chamferFeatures.createInput2()
+            chamfer_edges = commonUtils.objectCollectionFromList(faceUtils.getBottomFace(baseBottomExtrude.bodies.item(0)).edges)
+            chamferInput.chamferEdgeSets.addEqualDistanceChamferEdgeSet(chamfer_edges,
+                adsk.core.ValueInput.createByReal(const.BIN_BASE_BOTTOM_SECTION_HEIGH),
+                True)
+            chamferFeatures.add(chamferInput)
+
+    hasHoles = input.hasScrewHoles or input.hasMagnetCutouts
+    baseBottomPlane = baseBottomExtrude.endFaces.item(0)
+    baseBottomZ = baseBottomPlane.boundingBox.minPoint.z
+    if combineInto is not None:
+        if hasHoles:
+            # the bottom face goes away when the base is combined; a plane made from it keeps its
+            # position and sketch orientation for the hole cutouts
+            bottomPlaneInput = targetComponent.constructionPlanes.createInput()
+            bottomPlaneInput.setByOffset(baseBottomPlane, adsk.core.ValueInput.createByReal(0))
+            baseBottomPlane = targetComponent.constructionPlanes.add(bottomPlaneInput)
+            baseBottomPlane.name = 'Base bottom plane'
+            baseBottomPlane.isLightBulbOn = False
+        if not joinEarly:
+            combine(combineInto, commonUtils.objectCollectionFromList([baseBody]), targetComponent)
+    holeFeaturesStart = targetComponent.parentDesign.timeline.count
+    cutFrom = combineInto
+
     # screw holes
     circularPatternFeatures = features.circularPatternFeatures
     cutoutBodies = adsk.core.ObjectCollection.create()
 
-    baseBottomPlane = baseBottomExtrude.endFaces.item(0)
     baseHoleCenterPoint = DimPoint(
         const.DIMENSION_SCREW_HOLES_OFFSET - input.xyClearance,
         const.DIMENSION_SCREW_HOLES_OFFSET - input.xyClearance,
-        baseBottomPlane.boundingBox.minPoint.z
+        baseBottomZ
     )
     cutoutCenterPoint = DimPoint(baseHoleCenterPoint.x, baseHoleCenterPoint.y, 0)
     if input.hasScrewHoles:
@@ -224,8 +350,10 @@ def createSingleGridfinityBaseBody(
             input.screwHolesDiameter / 2,
             cutoutCenterPoint,
             targetComponent,
+            cutFrom=cutFrom,
         )
-        cutoutBodies.add(screwHoleBody)
+        if cutFrom is None:
+            cutoutBodies.add(screwHoleBody)
 
     # magnet cutouts
     if input.hasMagnetCutouts:
@@ -236,8 +364,10 @@ def createSingleGridfinityBaseBody(
             input.magnetCutoutsDiameter / 2,
             cutoutCenterPoint,
             targetComponent,
+            cutFrom=cutFrom,
         )
-        cutoutBodies.add(magnetSocketBody)
+        if cutFrom is None:
+            cutoutBodies.add(magnetSocketBody)
 
         # magnet tab cutouts
         if input.hasMagnetCutoutsTabs:
@@ -251,70 +381,67 @@ def createSingleGridfinityBaseBody(
 
             magnetTabCutoutExtrude = extrudeUtils.simpleDistanceExtrude(
                 magnetTabCutoutSketch.profiles.item(0),
-                adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+                adsk.fusion.FeatureOperations.CutFeatureOperation if cutFrom is not None else adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
                 input.magnetCutoutsDepth,
                 adsk.fusion.ExtentDirections.NegativeExtentDirection,
-                [],
+                [cutFrom] if cutFrom is not None else [],
                 targetComponent,
             )
-            cutoutBodies.add(magnetTabCutoutExtrude.bodies.item(0))
+            if cutFrom is None:
+                cutoutBodies.add(magnetTabCutoutExtrude.bodies.item(0))
         
         if input.hasScrewHoles and (const.BIN_BASE_HEIGHT - input.magnetCutoutsDepth) > const.BIN_MAGNET_HOLE_GROOVE_DEPTH:
-            grooveBody = shapeUtils.simpleCylinder(
+            # Print-helper groove above the magnet socket: a strip as wide as the screw hole across
+            # the socket (clipped by it), then a screw-hole-sized square, both turned -45 degrees.
+            # Upstream intersects a cylinder with two boxes and rotates the result with a move;
+            # drawing the layers already rotated avoids both, which break inside a feature pattern
+            # (IDENTICAL_TARGET_AND_TOOL_BODY, a rotate axis that stays with the first base).
+            stripHalfLength = input.magnetCutoutsDiameter / 2 + 0.1
+            halfScrew = input.screwHolesDiameter / 2
+            strip = [rotatedByMinus45(cutoutCenterPoint, u, v) for u, v in (
+                (-stripHalfLength, -halfScrew), (stripHalfLength, -halfScrew), (stripHalfLength, halfScrew), (-stripHalfLength, halfScrew))]
+            grooveLayer1 = createGrooveLayer(
                 baseBottomPlane,
                 -input.magnetCutoutsDepth,
-                -const.BIN_MAGNET_HOLE_GROOVE_DEPTH,
+                -const.BIN_MAGNET_HOLE_GROOVE_DEPTH / 2,
+                strip,
                 input.magnetCutoutsDiameter / 2,
                 cutoutCenterPoint,
                 targetComponent,
+                cutFrom=cutFrom,
             )
-            grooveBody.name = "Groove body"
-            grooveLayer1 = shapeUtils.simpleBox(
-                baseBottomPlane,
-                -input.magnetCutoutsDepth,
-                input.magnetCutoutsDiameter,
-                input.screwHolesDiameter,
-                -const.BIN_MAGNET_HOLE_GROOVE_DEPTH / 2,
-                DimPoint(baseHoleCenterPoint.x + input.magnetCutoutsDiameter / 2, baseHoleCenterPoint.y - input.screwHolesDiameter / 2, 0),
-                targetComponent,
-            )
-            grooveLayer1.name = "Groove layer 1 body"
-            grooveLayer2 = shapeUtils.simpleBox(
+            # the screw-sized square turned by 45 degrees has its corners on the axes through the centre
+            halfDiagonal = input.screwHolesDiameter * INVERSE_SQRT2
+            square = [
+                DimPoint(cutoutCenterPoint.x + halfDiagonal, cutoutCenterPoint.y, 0),
+                DimPoint(cutoutCenterPoint.x, cutoutCenterPoint.y + halfDiagonal, 0),
+                DimPoint(cutoutCenterPoint.x - halfDiagonal, cutoutCenterPoint.y, 0),
+                DimPoint(cutoutCenterPoint.x, cutoutCenterPoint.y - halfDiagonal, 0),
+            ]
+            grooveLayer2 = createGrooveLayer(
                 baseBottomPlane,
                 -(input.magnetCutoutsDepth + const.BIN_MAGNET_HOLE_GROOVE_DEPTH / 2),
-                input.screwHolesDiameter,
-                input.screwHolesDiameter,
                 -const.BIN_MAGNET_HOLE_GROOVE_DEPTH / 2,
-                DimPoint(baseHoleCenterPoint.x + input.screwHolesDiameter / 2, baseHoleCenterPoint.y - input.screwHolesDiameter / 2, 0),
+                square,
+                None,
+                cutoutCenterPoint,
                 targetComponent,
+                cutFrom=cutFrom,
             )
-            grooveLayer2.name = "Groove layer 2 body"
-            combineUtils.intersectBody(grooveBody, commonUtils.objectCollectionFromList([grooveLayer1, grooveLayer2]), targetComponent)
-
-            rotateGrooveBodyInput = targetComponent.features.moveFeatures.createInput2(commonUtils.objectCollectionFromList([grooveBody]))
-            if isParametric(cutoutCenterPoint.x, cutoutCenterPoint.y):
-                # rotate about an axis that follows the hole centre, a free move would stay put
-                holeAxis = createVerticalAxis(cutoutCenterPoint.x, cutoutCenterPoint.y, "Magnet groove", targetComponent)
-                # -45 degrees about +Z, whichever way the constructed axis points
-                grooveAngle = math.radians(-45) if holeAxis.geometry.direction.z > 0 else math.radians(45)
-                # a rotate move only accepts the axis in the active occurrence's context
-                activeOccurrence = targetComponent.parentDesign.activeOccurrence
-                if activeOccurrence is not None and activeOccurrence.component == targetComponent:
-                    holeAxis = holeAxis.createForAssemblyContext(activeOccurrence)
-                rotateGrooveBodyInput.defineAsRotate(holeAxis, adsk.core.ValueInput.createByReal(grooveAngle))
-            else:
-                verticalAxisVector = adsk.core.Vector3D.create(0, 0, 1.0)
-                transformRotate = adsk.core.Matrix3D.create()
-                transformRotate.setToRotation(math.radians(-45), verticalAxisVector, asPoint3D(cutoutCenterPoint))
-                rotateGrooveBodyInput.defineAsFreeMove(transformRotate)
-            ratateGrooveBodyFeature = targetComponent.features.moveFeatures.add(rotateGrooveBodyInput)
-            ratateGrooveBodyFeature.name = "Rotate groove by 45 degree"
-
-            cutoutBodies.add(grooveBody)
+            if cutFrom is None:
+                grooveLayer1.name = "Groove layer 1 body"
+                grooveLayer2.name = "Groove layer 2 body"
+                cutoutBodies.add(grooveLayer1)
+                cutoutBodies.add(grooveLayer2)
 
 
-    if input.hasScrewHoles or input.hasMagnetCutouts:
-        if cutoutBodies.count > 1:
+    if hasHoles:
+        if combineInto is not None:
+            # this corner's holes were cut straight from the combined body; repeat them with a
+            # pattern of *features* (a pattern of bodies cannot be repeated by the outer pattern,
+            # and cutout bodies combined inside nested patterns go missing in some copies)
+            holeFeatures = timelineFeaturesSince(targetComponent.parentDesign, holeFeaturesStart)
+        elif cutoutBodies.count > 1:
             joinFeature = combineUtils.joinBodies(cutoutBodies.item(0), commonUtils.objectCollectionFromList(list(cutoutBodies)[1:]), targetComponent)
             cutoutBodies = commonUtils.objectCollectionFromList(joinFeature.bodies)
 
@@ -336,13 +463,22 @@ def createSingleGridfinityBaseBody(
         baseCenterAxis = targetComponent.constructionAxes.add(patternAxisInput)
         baseCenterAxis.name = "Base center axis"
         baseCenterAxis.isLightBulbOn = False
-        patternInput = circularPatternFeatures.createInput(
-            cutoutBodies,
-            baseCenterAxis,
-        )
-        patternInput.quantity = adsk.core.ValueInput.createByString("4")
-        patternFeature = circularPatternFeatures.add(patternInput)
-        combineUtils.cutBody(baseBody, commonUtils.objectCollectionFromList(list(cutoutBodies) + list(patternFeature.bodies)), targetComponent)
+        if combineInto is not None:
+            patternInput = circularPatternFeatures.createInput(
+                commonUtils.objectCollectionFromList(holeFeatures),
+                baseCenterAxis,
+            )
+            patternInput.quantity = adsk.core.ValueInput.createByString("4")
+            patternInput.patternComputeOption = adsk.fusion.PatternComputeOptions.AdjustPatternCompute
+            circularPatternFeatures.add(patternInput).name = 'Base holes pattern'
+        else:
+            patternInput = circularPatternFeatures.createInput(
+                cutoutBodies,
+                baseCenterAxis,
+            )
+            patternInput.quantity = adsk.core.ValueInput.createByString("4")
+            patternFeature = circularPatternFeatures.add(patternInput)
+            combineUtils.cutBody(baseBody, commonUtils.objectCollectionFromList(list(cutoutBodies) + list(patternFeature.bodies)), targetComponent)
 
     return baseBody
 
@@ -434,6 +570,82 @@ def createBaseBodyPattern(
     rectangularPattern = rectangularPatternFeatures.add(patternInput)
     return list(rectangularPattern.bodies) + [baseBody]
 
+def timelineFeaturesSince(design: adsk.fusion.Design, firstIndex: int) -> list:
+    """Features (not sketches / construction geometry) added to the timeline from firstIndex on."""
+    features = []
+    for index in range(firstIndex, design.timeline.count):
+        entity = design.timeline.item(index).entity
+        if entity is not None and adsk.fusion.Feature.cast(entity) is not None:
+            features.append(entity)
+    return features
+
+def createBaseFeaturePattern(
+    baseConfiguration: BaseGeneratorInput,
+    basesXCount,
+    basesYCount,
+    targetBody: adsk.fusion.BRepBody,
+    targetComponent: adsk.fusion.Component,
+    combine=combineUtils.joinBodies,
+    computeOption=adsk.fusion.PatternComputeOptions.AdjustPatternCompute,
+    spacing=None,
+):
+    """One base combined into `targetBody` (joined, or cut with combine=combineUtils.cutBody),
+    repeated by a pattern of its *features*.
+
+    A pattern of base bodies followed by a Combine cannot follow a count change (new instances stay
+    loose bodies, removed ones leave lost references); a feature pattern that includes the Combine
+    regenerates as one body for any count, so the counts may be Dims.
+    `spacing` (x, y) defaults to the base size; lip notch cutouts are wider than their spacing.
+    """
+    spacingX, spacingY = spacing if spacing is not None else (baseConfiguration.baseWidth, baseConfiguration.baseLength)
+    design = targetComponent.parentDesign
+    firstIndex = design.timeline.count
+    createSingleGridfinityBaseBody(baseConfiguration, targetComponent, combineInto=targetBody, combine=combine)
+    baseFeatures = timelineFeaturesSince(design, firstIndex)
+    if float(basesXCount) * float(basesYCount) <= 1 and not isParametric(basesXCount, basesYCount):
+        return None
+    rectangularPatternFeatures: adsk.fusion.RectangularPatternFeatures = targetComponent.features.rectangularPatternFeatures
+    patternInput = rectangularPatternFeatures.createInput(commonUtils.objectCollectionFromList(baseFeatures),
+        targetComponent.xConstructionAxis,
+        toValueInput(basesXCount),
+        toValueInput(spacingX),
+        adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
+    patternInput.directionTwoEntity = targetComponent.yConstructionAxis
+    patternInput.quantityTwo = toValueInput(basesYCount)
+    patternInput.distanceTwo = toValueInput(spacingY)
+    patternInput.patternComputeOption = computeOption
+    rectangularPattern = rectangularPatternFeatures.add(patternInput)
+    rectangularPattern.name = 'Base pattern'
+    return rectangularPattern
+
+BASE_CARRIER_THICKNESS = 0.005
+BASE_CARRIER_INSET = 0.4
+
+def createBaseCarrier(
+    baseConfiguration: BaseGeneratorInput,
+    basesXCount,
+    basesYCount,
+    targetComponent: adsk.fusion.Component,
+) -> adsk.fusion.BRepBody:
+    """A 0.05 mm plate on top of the bases, inside the bin floor and away from its rounded corners.
+
+    The base pattern joins every base into this plate before the bin body exists: in a feature
+    pattern whose combines target a complex body (the finished bin), some copies fail to find
+    their target (MULTIPLE_TARGET_ERROR) depending on size and feature mix. The plate is later
+    joined into the bin body as one body, whatever the count, and adds no material of its own."""
+    xyClearance = baseConfiguration.xyClearance
+    carrier = extrudeUtils.createBoxAtPoint(
+        baseConfiguration.baseWidth * basesXCount - xyClearance * 2 - BASE_CARRIER_INSET * 2,
+        baseConfiguration.baseLength * basesYCount - xyClearance * 2 - BASE_CARRIER_INSET * 2,
+        BASE_CARRIER_THICKNESS,
+        targetComponent,
+        DimPoint(baseConfiguration.originPoint.x + xyClearance + BASE_CARRIER_INSET, baseConfiguration.originPoint.y + xyClearance + BASE_CARRIER_INSET, baseConfiguration.originPoint.z),
+    )
+    carrier.name = 'Base carrier'
+    body = carrier.bodies.item(0)
+    body.name = 'Bases'
+    return body
+
 def cutBaseClearance(
     baseConfiguration: BaseGeneratorInput,
     basesXCount,
@@ -487,6 +699,8 @@ def cutBaseClearance(
         adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(100)),
         adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(100)),
     )
-    clearanceCutExtrudeInput.participantBodies = list(targetComponent.bRepBodies)
+    # no explicit participants: the cut then applies to whatever bodies it meets on every recompute.
+    # An explicit list (upstream used all current bodies) loses its reference when the bin count
+    # changes ("Body 1 missing").
     clearanceCutExtrude = features.extrudeFeatures.add(clearanceCutExtrudeInput)
     clearanceCutExtrude.name = "Base side clearance cut"

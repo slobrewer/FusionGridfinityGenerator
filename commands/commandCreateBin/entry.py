@@ -16,7 +16,7 @@ from ...lib.gridfinityUtils import commonUtils
 from ...lib.gridfinityUtils import const
 from ...lib.gridfinityUtils import binParameters
 from ...lib.gridfinityUtils.dim import DimPoint, dmax, dmin
-from ...lib.gridfinityUtils.baseGenerator import createSingleGridfinityBaseBody, createBaseBodyPattern, cutBaseClearance
+from ...lib.gridfinityUtils.baseGenerator import createSingleGridfinityBaseBody, createBaseBodyPattern, createBaseFeaturePattern, createBaseCarrier, cutBaseClearance
 from ...lib.gridfinityUtils.baseGeneratorInput import BaseGeneratorInput
 from ...lib.gridfinityUtils.binBodyGenerator import createGridfinityBinBody, uniformCompartments
 from ...lib.gridfinityUtils.binBodyGeneratorInput import BinBodyGeneratorInput, BinBodyCompartmentDefinition
@@ -900,7 +900,10 @@ def generateBin(args: adsk.core.CommandEventArgs):
         xyClearance = xy_clearance.value
         binName = 'Gridfinity bin {}x{}x{}'.format(int(bin_length.value), int(bin_width.value), int(bin_height.value))
 
-        # user parameters: every dialog value is recorded, the live ones drive the geometry below
+        # user parameters: every dialog value is recorded, the live ones drive the geometry below.
+        # The bin X/Y count needs a body to join the patterned bases into; a base-only bin keeps
+        # upstream's pattern of separate base bodies, so there the count is recorded only.
+        infoOnlyKeys = set() if bin_generate_body.value else {'bin_width_u', 'bin_length_u'}
         parameterPrefix = binParameters.allocatePrefix(des)
         binParams = binParameters.createBinParameters(des, parameterPrefix, {
             'bin_width_u': bin_width.value,
@@ -932,12 +935,12 @@ def generateBin(args: adsk.core.CommandEventArgs):
             'has_screw_holes': bin_screw_holes.value,
             'has_magnets': bin_magnet_cutouts.value,
             'has_magnet_tabs': bin_magnet_cutouts_tabs.value,
-        })
+        }, infoOnlyKeys)
         binName = f'{binName} [{parameterPrefix.rstrip("_")}]'
 
         def liveValue(key: str, plainValue):
             spec = next(spec for spec in binParameters.BIN_PARAMETER_SPECS if spec.key == key)
-            return binParams[key] if spec.live else plainValue
+            return binParams[key] if spec.live and key not in infoOnlyKeys else plainValue
 
         xyClearance = liveValue('xy_clearance', xyClearance)
 
@@ -969,9 +972,11 @@ def generateBin(args: adsk.core.CommandEventArgs):
         baseGeneratorInput.magnetCutoutsDiameter = liveValue('magnet_diameter', bin_magnet_cutout_diameter.value)
         baseGeneratorInput.magnetCutoutsDepth = liveValue('magnet_depth', bin_magnet_cutout_depth.value)
 
-        baseBodies: list[adsk.fusion.BRepBody]
-        if bin_generate_base.value:
-            baseBodies = createBaseBodyPattern(
+        binWidthCount = liveValue('bin_width_u', bin_width.value)
+        binLengthCount = liveValue('bin_length_u', bin_length.value)
+
+        if bin_generate_base.value and not bin_generate_body.value:
+            createBaseBodyPattern(
                 baseGeneratorInput,
                 bin_width.value,
                 bin_length.value,
@@ -982,8 +987,8 @@ def generateBin(args: adsk.core.CommandEventArgs):
         binBodyInput = BinBodyGeneratorInput()
         binBodyInput.hasLip = with_lip.value
         binBodyInput.hasLipNotches = with_lip_notches.value
-        binBodyInput.binWidth = bin_width.value
-        binBodyInput.binLength = bin_length.value
+        binBodyInput.binWidth = binWidthCount
+        binBodyInput.binLength = binLengthCount
         binBodyInput.binHeight = liveValue('bin_height_u', bin_height.value)
         binBodyInput.baseWidth = liveValue('base_width', base_width_unit.value)
         binBodyInput.baseLength = liveValue('base_length', base_length_unit.value)
@@ -1015,26 +1020,43 @@ def generateBin(args: adsk.core.CommandEventArgs):
                 binBodyInput.compartments.append(BinBodyCompartmentDefinition(positionX.value, positionY.value, width.value, length.value, depth.value))
 
         binBody: adsk.fusion.BRepBody
+        combineFeatures = gridfinityBinComponent.features.combineFeatures
+
+        baseCarrier = None
+        if bin_generate_body.value and bin_generate_base.value:
+            # one base joined into a carrier plate and repeated by a feature pattern, so the bin
+            # X/Y count can change later; the carrier joins the body below
+            baseCarrier = createBaseCarrier(
+                baseGeneratorInput,
+                binWidthCount,
+                binLengthCount,
+                gridfinityBinComponent,
+            )
+            createBaseFeaturePattern(
+                baseGeneratorInput,
+                binWidthCount,
+                binLengthCount,
+                baseCarrier,
+                gridfinityBinComponent,
+            )
 
         if bin_generate_body.value:
             binBody = createGridfinityBinBody(
                 binBodyInput,
                 gridfinityBinComponent,
             )
-        if bin_generate_body.value or bin_generate_base.value:
+            if baseCarrier is not None:
+                combineUtils.joinBodies(binBody, commonUtils.objectCollectionFromList([baseCarrier]), gridfinityBinComponent)
+        # the clearance cut trims only the bases; without them it has no target and fails
+        if bin_generate_base.value:
             cutBaseClearance(
                 baseGeneratorInput,
-                bin_width.value,
-                bin_length.value,
+                binWidthCount,
+                binLengthCount,
                 gridfinityBinComponent,
             )
 
-        # merge everything
         if bin_generate_body.value and bin_generate_base.value:
-            toolBodies = commonUtils.objectCollectionFromList(baseBodies)
-            combineFeatures = gridfinityBinComponent.features.combineFeatures
-            combineFeatureInput = combineFeatures.createInput(binBody, toolBodies)
-            combineFeatures.add(combineFeatureInput)
             gridfinityBinComponent.bRepBodies.item(0).name = binName
 
         if isShelled and bin_generate_body.value:

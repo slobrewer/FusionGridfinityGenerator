@@ -3,7 +3,7 @@ import adsk.core, adsk.fusion, traceback
 import os
 
 from . import const, geometryUtils
-from .dim import DimPoint, applyExpression, asPoint3D, isParametric
+from .dim import Dim, DimPoint, applyExpression, asPoint3D, isParametric
 
 def isVertical(line: adsk.fusion.SketchLine):
     return math.isclose(line.startSketchPoint.geometry.x, line.endSketchPoint.geometry.x, abs_tol=const.DEFAULT_FILTER_TOLERANCE)
@@ -81,6 +81,78 @@ def createRectangle(
     applyExpression(widthDimension, width)
     applyExpression(lengthDimension, length)
     return rectangleLines
+
+def _coordinateKey(value):
+    return value.expr if isinstance(value, Dim) else round(float(value), 9)
+
+def createRoundedRectangle(
+    width,
+    length,
+    startPoint,
+    radius,
+    sketch: adsk.fusion.Sketch,
+):
+    """createRectangle with all four corners filleted to `radius` (equal radii, one radial
+    dimension linked to `radius`)."""
+    [side1, side2, side3, side4] = list(createRectangle(width, length, startPoint, sketch))
+    arcs = sketch.sketchCurves.sketchArcs
+    radiusValue = float(radius)
+    fillet1 = arcs.addFillet(side1, side1.endSketchPoint.geometry, side2, side2.startSketchPoint.geometry, radiusValue)
+    fillet2 = arcs.addFillet(side2, side2.endSketchPoint.geometry, side3, side3.startSketchPoint.geometry, radiusValue)
+    fillet3 = arcs.addFillet(side3, side3.endSketchPoint.geometry, side4, side4.startSketchPoint.geometry, radiusValue)
+    fillet4 = arcs.addFillet(side4, side4.endSketchPoint.geometry, side1, side1.startSketchPoint.geometry, radiusValue)
+    constraints = sketch.geometricConstraints
+    constraints.addEqual(fillet1, fillet2)
+    constraints.addEqual(fillet2, fillet3)
+    constraints.addEqual(fillet3, fillet4)
+    applyExpression(sketch.sketchDimensions.addRadialDimension(fillet1, fillet1.startSketchPoint.geometry), radius)
+
+def createPolygon(points: list, sketch: adsk.fusion.Sketch):
+    """Closed polygon through `points` (sketch space, DimPoints allowed). Every vertex gets a
+    horizontal and a vertical dimension from the sketch origin, linked to its expressions.
+
+    Fusion reports a sketch as over constrained when two points get distance dimensions of the same
+    value along the same axis, so a vertex that shares a coordinate expression with an earlier
+    vertex is aligned to it (vertical / horizontal points constraint) instead."""
+    dimensions: adsk.fusion.SketchDimensions = sketch.sketchDimensions
+    constraints: adsk.fusion.GeometricConstraints = sketch.geometricConstraints
+    lines: adsk.fusion.SketchLines = sketch.sketchCurves.sketchLines
+    corners = [adsk.core.Point3D.create(float(point.x), float(point.y), 0) for point in points]
+    polygonLines = []
+    for index in range(len(corners)):
+        start = polygonLines[-1].endSketchPoint if polygonLines else corners[0]
+        end = polygonLines[0].startSketchPoint if index == len(corners) - 1 else corners[index + 1]
+        polygonLines.append(lines.addByTwoPoints(start, end))
+    dimensionedX = {}
+    dimensionedY = {}
+    for point, line in zip(points, polygonLines):
+        vertex = line.startSketchPoint
+        xKey, yKey = _coordinateKey(point.x), _coordinateKey(point.y)
+        if xKey in dimensionedX:
+            constraints.addVerticalPoints(dimensionedX[xKey], vertex)
+        else:
+            xDimension = dimensions.addDistanceDimension(
+                sketch.originPoint,
+                vertex,
+                adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation,
+                adsk.core.Point3D.create(vertex.geometry.x, vertex.geometry.y + 0.5, 0),
+                True,
+            )
+            applyExpression(xDimension, point.x)
+            dimensionedX[xKey] = vertex
+        if yKey in dimensionedY:
+            constraints.addHorizontalPoints(dimensionedY[yKey], vertex)
+        else:
+            yDimension = dimensions.addDistanceDimension(
+                sketch.originPoint,
+                vertex,
+                adsk.fusion.DimensionOrientations.VerticalDimensionOrientation,
+                adsk.core.Point3D.create(vertex.geometry.x + 0.5, vertex.geometry.y, 0),
+                True,
+            )
+            applyExpression(yDimension, point.y)
+            dimensionedY[yKey] = vertex
+    return polygonLines
 
 def filterCirclesByRadius(
     radius: float,

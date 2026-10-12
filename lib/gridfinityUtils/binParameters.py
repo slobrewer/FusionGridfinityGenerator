@@ -14,8 +14,8 @@ class ParameterSpec:
 
 # Order here is the order parameters appear in Change Parameters.
 BIN_PARAMETER_SPECS = [
-    ParameterSpec('bin_width_u', UNITLESS, 'bin width, X (u)', False),
-    ParameterSpec('bin_length_u', UNITLESS, 'bin length, Y (u)', False),
+    ParameterSpec('bin_width_u', UNITLESS, 'bin width, X (u)', True),
+    ParameterSpec('bin_length_u', UNITLESS, 'bin length, Y (u)', True),
     ParameterSpec('bin_height_u', UNITLESS, 'bin height, Z (u)', True),
     ParameterSpec('base_width', LENGTH, 'base width unit', True),
     ParameterSpec('base_length', LENGTH, 'base length unit', True),
@@ -53,22 +53,34 @@ def allocatePrefix(design: adsk.fusion.Design, base: str = BIN_PARAMETER_PREFIX)
         index += 1
     return f'{base}{index}_'
 
-def createBinParameters(design: adsk.fusion.Design, prefix: str, values: dict) -> dict:
-    """Create (or update, if already present) one user parameter per spec.
+def createBinParameters(design: adsk.fusion.Design, prefix: str, values: dict, infoOnlyKeys=()) -> dict:
+    """Create (or update, if already present) one user parameter per bin spec.
 
     `values` maps spec key to a number in API units (cm for lengths, radians for angles) or a bool.
+    `infoOnlyKeys` are live specs that do not drive this particular bin (commented as info only).
     Returns spec key -> Dim referencing the parameter.
     """
+    return createParameters(design, prefix, values, BIN_PARAMETER_SPECS, 'Gridfinity bin', infoOnlyKeys)
+
+def createBaseplateParameters(design: adsk.fusion.Design, prefix: str, values: dict, infoOnlyKeys=()) -> dict:
+    """createBinParameters for the baseplate command (BASEPLATE_PARAMETER_SPECS)."""
+    return createParameters(design, prefix, values, BASEPLATE_PARAMETER_SPECS, 'Gridfinity baseplate', infoOnlyKeys)
+
+def isLive(specs: list, key: str, infoOnlyKeys=()) -> bool:
+    return next(spec for spec in specs if spec.key == key).live and key not in infoOnlyKeys
+
+def createParameters(design: adsk.fusion.Design, prefix: str, values: dict, specs: list, title: str, infoOnlyKeys=()) -> dict:
     userParameters = design.userParameters
     result = {}
     groupName = prefix.rstrip('_')
-    for spec in BIN_PARAMETER_SPECS:
+    for spec in specs:
         value = values[spec.key]
         if isinstance(value, bool):
             value = 1 if value else 0
         name = prefix + spec.key
         expression = literalExpression(float(value), spec.kind)
-        comment = f'Gridfinity bin {groupName}: {spec.label}' + ('' if spec.live else ' (info only, changing it has no effect)')
+        live = spec.live and spec.key not in infoOnlyKeys
+        comment = f'{title} {groupName}: {spec.label}' + ('' if live else ' (info only, changing it has no effect)')
         parameter = userParameters.itemByName(name)
         if parameter is None:
             parameter = userParameters.add(name, adsk.core.ValueInput.createByString(expression), spec.kind, comment)
