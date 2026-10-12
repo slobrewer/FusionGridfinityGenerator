@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, traceback
 import os
 
 from . import sketchUtils
+from .dim import toValueInput, asPoint3D
 
 def simpleDistanceExtrude(
     profile: adsk.core.Base,
@@ -15,7 +16,7 @@ def simpleDistanceExtrude(
     extrudeFeatures: adsk.fusion.ExtrudeFeatures = features.extrudeFeatures
     extrudeInput = extrudeFeatures.createInput(profile, operation)
     extrudeInput.participantBodies = participantBodies
-    extrudeExtent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(distance))
+    extrudeExtent = adsk.fusion.DistanceExtentDefinition.create(toValueInput(distance))
     extrudeInput.setOneSideExtent(
         extrudeExtent,
         direction,
@@ -40,7 +41,7 @@ def createBox(
 
     # extrude
     extrude = extrudeFeatures.addSimple(recSketch.profiles.item(0),
-        adsk.core.ValueInput.createByReal(height),
+        toValueInput(height),
         adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
     extrude.name = 'Simple box extrude'
     return extrude
@@ -57,18 +58,18 @@ def createBoxAtPoint(
     boxPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
     boxPlaneInput.setByOffset(
         targetComponent.xYConstructionPlane,
-        adsk.core.ValueInput.createByReal(originPoint.z)
+        toValueInput(originPoint.z)
     )
     boxConstructionPlane = targetComponent.constructionPlanes.add(boxPlaneInput)
     boxConstructionPlane.name = 'Simple box at point construction plane'
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     recSketch: adsk.fusion.Sketch = sketches.add(boxConstructionPlane)
     recSketch.name = 'Simple box at point sketch'
-    sketchUtils.createRectangle(width, length, recSketch.modelToSketchSpace(originPoint), recSketch)
+    sketchUtils.createRectangle(width, length, recSketch.modelToSketchSpace(asPoint3D(originPoint)), recSketch)
         
     # extrude
     extrude = extrudeFeatures.addSimple(recSketch.profiles.item(0),
-        adsk.core.ValueInput.createByReal(height),
+        toValueInput(height),
         adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
     extrude.name = 'Simple box at point extrude'
     return extrude

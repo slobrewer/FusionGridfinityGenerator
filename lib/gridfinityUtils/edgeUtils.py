@@ -18,7 +18,7 @@ def selectEdgesByLength(
     filteredEdges = adsk.core.ObjectCollection.create()
     for face in faces:
         for edge in face.edges:
-            if math.isclose(edge.length, filterEdgeLength, abs_tol=filterEdgeTolerance):
+            if math.isclose(edge.length, float(filterEdgeLength), abs_tol=filterEdgeTolerance):
                 filteredEdges.add(edge)
     return filteredEdges
 

@@ -14,6 +14,7 @@ from .binBodyTabGenerator import createGridfinityBinBodyTab
 from .binBodyLipGeneratorInput import BinBodyLipGeneratorInput
 from .binBodyLipGenerator import createGridfinityBinBodyLip
 from ... import config
+from .dim import DimPoint, dmax, dmin
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -33,7 +34,7 @@ def createGridfinityBinBody(
     actualBodyWidth = (input.baseWidth * input.binWidth) - input.xyClearance * 2.0
     actualBodyLength = (input.baseLength * input.binLength) - input.xyClearance * 2.0
     binHeightWithoutBase = input.binHeight - 1
-    binBodyTotalHeight = binHeightWithoutBase * input.heightUnit + max(0, input.heightUnit - const.BIN_BASE_HEIGHT)
+    binBodyTotalHeight = binHeightWithoutBase * input.heightUnit + dmax(0, input.heightUnit - const.BIN_BASE_HEIGHT)
     features: adsk.fusion.Features = targetComponent.features
     binBodyExtrude = extrudeUtils.createBox(
         actualBodyWidth,
@@ -57,11 +58,7 @@ def createGridfinityBinBody(
     ).name = 'Bin body corner fillets'
 
     if input.hasLip:
-        lipOriginPoint = adsk.core.Point3D.create(
-            0,
-            0,
-            binHeightWithoutBase * input.heightUnit + max(0, input.heightUnit - const.BIN_BASE_HEIGHT)
-        )
+        lipOriginPoint = DimPoint(0, 0, binBodyTotalHeight)
         lipInput = BinBodyLipGeneratorInput()
         lipInput.baseLength = input.baseLength
         lipInput.baseWidth = input.baseWidth
@@ -80,7 +77,7 @@ def createGridfinityBinBody(
                 (actualBodyLength - input.wallThickness - const.BIN_LIP_WALL_THICKNESS + input.xyClearance) if input.hasScoop else (actualBodyLength - input.wallThickness * 2),
                 lipBottomChamferSize,
                 targetComponent,
-                adsk.core.Point3D.create(
+                DimPoint(
                     input.wallThickness,
                     (const.BIN_LIP_WALL_THICKNESS - input.xyClearance) if input.hasScoop else input.wallThickness,
                     lipOriginPoint.z,
@@ -124,17 +121,19 @@ def createGridfinityBinBody(
         for compartment in input.compartments:
             compartmentX = compartmentsMinX + compartment.positionX * (compartmentWidthUnit + input.wallThickness)
             compartmentY = compartmentsMinY + compartment.positionY * (compartmentLengthUnit + input.wallThickness)
-            compartmentOriginPoint = adsk.core.Point3D.create(
+            compartmentOriginPoint = DimPoint(
                 compartmentX,
                 compartmentY,
                 binBodyTotalHeight
             )
             compartmentWidth = compartmentWidthUnit * compartment.width + (compartment.width - 1) * input.wallThickness
             compartmentLength = compartmentLengthUnit * compartment.length + (compartment.length - 1) * input.wallThickness
-            compartmentDepth = min(binBodyTotalHeight - const.BIN_COMPARTMENT_BOTTOM_THICKNESS, compartment.depth)
+            fullCompartmentDepth = binBodyTotalHeight - const.BIN_COMPARTMENT_BOTTOM_THICKNESS
+            # a compartment at least as deep as the bin follows the bin height when it changes
+            compartmentDepth = fullCompartmentDepth if compartment.depth >= fullCompartmentDepth else dmin(fullCompartmentDepth, compartment.depth)
 
             compartmentTabInput = BinBodyTabGeneratorInput()
-            tabOriginPoint = adsk.core.Point3D.create(
+            tabOriginPoint = DimPoint(
                 compartmentOriginPoint.x + max(0, min(input.tabPosition, input.binWidth - input.tabLength)) * input.baseWidth,
                 compartmentOriginPoint.y + compartmentLength,
                 compartmentOriginPoint.z,
@@ -164,7 +163,7 @@ def createGridfinityBinBody(
         if len(input.compartments) > 1:
             compartmentsTopClearance = createCompartmentCutout(
                 input.wallThickness,
-                adsk.core.Point3D.create(
+                DimPoint(
                     compartmentsMinX,
                     compartmentsMinY,
                     binBodyTotalHeight

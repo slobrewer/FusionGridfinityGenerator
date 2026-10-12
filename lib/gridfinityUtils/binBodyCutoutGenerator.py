@@ -9,6 +9,7 @@ from . import const, combineUtils, faceUtils, commonUtils, sketchUtils, extrudeU
 from .baseGeneratorInput import BaseGeneratorInput
 from .binBodyCutoutGeneratorInput import BinBodyCutoutGeneratorInput
 from ... import config
+from .dim import toValueInput, dmax, dmin, isParametric
 
 app = adsk.core.Application.get()
 ui = app.userInterface
@@ -29,7 +30,7 @@ def createGridfinityBinBodyCutout(
     cutoutPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
     cutoutPlaneInput.setByOffset(
         targetComponent.xYConstructionPlane,
-        adsk.core.ValueInput.createByReal(input.origin.z)
+        toValueInput(input.origin.z)
     )
     cutoutConstructionPlane = targetComponent.constructionPlanes.add(cutoutPlaneInput)
     innerCutoutSketch: adsk.fusion.Sketch = targetComponent.sketches.add(cutoutConstructionPlane)
@@ -37,7 +38,7 @@ def createGridfinityBinBodyCutout(
     sketchUtils.createRectangle(
         input.width,
         input.length,
-        adsk.core.Point3D.create(input.origin.x, input.origin.y, 0),
+        adsk.core.Point3D.create(float(input.origin.x), float(input.origin.y), 0),
         innerCutoutSketch,
     )
 
@@ -57,7 +58,12 @@ def createGridfinityBinBodyCutout(
     if input.hasScoop:
         [innerCutoutScoopFace, innerCutoputScoopOppositeFace] = getInnerCutoutScoopFace(innerCutoutBody)
         scoopEdge = faceUtils.getBottomHorizontalEdge(innerCutoutScoopFace.edges)
-        scoopMaxRadius = min(input.scoopMaxRadius, input.height) if min(input.scoopMaxRadius, input.height) >= input.filletRadius else input.filletRadius
+        scoopHeightLimit = input.height
+        if isParametric(input.height):
+            # a scoop as tall as the wall consumes the whole face and later fillets lose their
+            # edges when the height changes; leaving a sliver of wall keeps the topology stable
+            scoopHeightLimit = input.height - const.BIN_SCOOP_MIN_TOP_WALL
+        scoopMaxRadius = dmax(dmin(input.scoopMaxRadius, scoopHeightLimit), input.filletRadius)
         filletUtils.createFillet(
             [scoopEdge],
             scoopMaxRadius,

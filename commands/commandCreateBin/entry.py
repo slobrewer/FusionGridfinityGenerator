@@ -12,6 +12,8 @@ from ...lib.gridfinityUtils import faceUtils
 from ...lib.gridfinityUtils import shellUtils
 from ...lib.gridfinityUtils import commonUtils
 from ...lib.gridfinityUtils import const
+from ...lib.gridfinityUtils import binParameters
+from ...lib.gridfinityUtils.dim import DimPoint, dmax
 from ...lib.gridfinityUtils.baseGenerator import createSingleGridfinityBaseBody, createBaseBodyPattern, cutBaseClearance
 from ...lib.gridfinityUtils.baseGeneratorInput import BaseGeneratorInput
 from ...lib.gridfinityUtils.binBodyGenerator import createGridfinityBinBody, uniformCompartments
@@ -27,7 +29,7 @@ ui = app.userInterface
 
 # *** The command identity information. ***
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdBin'
-CMD_NAME = 'Gridfinity bin'
+CMD_NAME = 'Gridfinity bin (parametric)'
 CMD_Description = 'Create simple gridfinity bin'
 
 commandUIState = CommandUiState(CMD_NAME)
@@ -896,6 +898,45 @@ def generateBin(args: adsk.core.CommandEventArgs):
         xyClearance = xy_clearance.value
         binName = 'Gridfinity bin {}x{}x{}'.format(int(bin_length.value), int(bin_width.value), int(bin_height.value))
 
+        # user parameters: every dialog value is recorded, the live ones drive the geometry below
+        parameterPrefix = binParameters.allocatePrefix(des)
+        binParams = binParameters.createBinParameters(des, parameterPrefix, {
+            'bin_width_u': bin_width.value,
+            'bin_length_u': bin_length.value,
+            'bin_height_u': bin_height.value,
+            'base_width': base_width_unit.value,
+            'base_length': base_length_unit.value,
+            'height_unit': height_unit.value,
+            'xy_clearance': xyClearance,
+            'wall_thickness': bin_wall_thickness.value,
+            'screw_diameter': bin_screw_hole_diameter.value,
+            'magnet_diameter': bin_magnet_cutout_diameter.value,
+            'magnet_depth': bin_magnet_cutout_depth.value,
+            'scoop_radius': binScoopMaxRadius.value,
+            'tab_length_u': binTabLength.value,
+            'tab_width': binTabWidth.value,
+            'tab_offset_u': binTabPosition.value,
+            'tab_angle': binTabAngle.value,
+            'compartments_x': compartmentsX.value,
+            'compartments_y': compartmentsY.value,
+            'compartments_custom': binCompartmentGridTypeDropdownInput.selectedItem.name == BIN_COMPARTMENTS_GRID_TYPE_CUSTOM,
+            'bin_type': 0 if isHollow else (1 if isShelled else 2),
+            'generate_body': bin_generate_body.value,
+            'generate_base': bin_generate_base.value,
+            'has_lip': with_lip.value,
+            'has_lip_notches': with_lip_notches.value,
+            'has_scoop': has_scoop.value,
+            'has_tab': hasTabInput.value,
+            'has_screw_holes': bin_screw_holes.value,
+            'has_magnets': bin_magnet_cutouts.value,
+            'has_magnet_tabs': bin_magnet_cutouts_tabs.value,
+        })
+        binName = f'{binName} [{parameterPrefix.rstrip("_")}]'
+
+        def liveValue(key: str, plainValue):
+            spec = next(spec for spec in binParameters.BIN_PARAMETER_SPECS if spec.key == key)
+            return binParams[key] if spec.live else plainValue
+
         originalTimelineCount = des.timeline.count
         if des.designIntent == adsk.fusion.DesignIntentTypes.HybridDesignIntentType:
             # create new component, only allowed in hybrid intent type
@@ -939,10 +980,10 @@ def generateBin(args: adsk.core.CommandEventArgs):
         binBodyInput.hasLipNotches = with_lip_notches.value
         binBodyInput.binWidth = bin_width.value
         binBodyInput.binLength = bin_length.value
-        binBodyInput.binHeight = bin_height.value
+        binBodyInput.binHeight = liveValue('bin_height_u', bin_height.value)
         binBodyInput.baseWidth = base_width_unit.value
         binBodyInput.baseLength = base_length_unit.value
-        binBodyInput.heightUnit = height_unit.value
+        binBodyInput.heightUnit = liveValue('height_unit', height_unit.value)
         binBodyInput.xyClearance = xyClearance
         binBodyInput.binCornerFilletRadius = const.BIN_CORNER_FILLET_RADIUS - xyClearance
         binBodyInput.isSolid = isSolid or isShelled
@@ -1021,10 +1062,10 @@ def generateBin(args: adsk.core.CommandEventArgs):
 
             if hasTabInput.value:
                 compartmentTabInput = BinBodyTabGeneratorInput()
-                tabOriginPoint = adsk.core.Point3D.create(
+                tabOriginPoint = DimPoint(
                     binBodyInput.wallThickness + max(0, min(binBodyInput.tabPosition, binBodyInput.binWidth - binBodyInput.tabLength)) * binBodyInput.baseWidth,
                     const.BIN_LIP_WALL_THICKNESS if binBodyInput.hasLip and binBodyInput.hasScoop else binBodyInput.wallThickness + binBodyInput.binLength * binBodyInput.baseLength - binBodyInput.wallThickness - binBodyInput.xyClearance * 2,
-                    (binBodyInput.binHeight - 1) * binBodyInput.heightUnit + max(0, binBodyInput.heightUnit - const.BIN_BASE_HEIGHT),
+                    (binBodyInput.binHeight - 1) * binBodyInput.heightUnit + dmax(0, binBodyInput.heightUnit - const.BIN_BASE_HEIGHT),
                 )
                 compartmentTabInput.origin = tabOriginPoint
                 compartmentTabInput.length = max(0, min(binBodyInput.tabLength, binBodyInput.binWidth)) * binBodyInput.baseWidth - binBodyInput.wallThickness * 2 - binBodyInput.xyClearance * 2

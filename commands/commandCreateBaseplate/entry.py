@@ -20,7 +20,7 @@ ui = app.userInterface
 
 # The command identity information. ***
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdBaseplate'
-CMD_NAME = 'Gridfinity baseplate'
+CMD_NAME = 'Gridfinity baseplate (parametric)'
 CMD_Description = 'Create gridfinity baseplate'
 
 uiState = CommandUiState(CMD_NAME)
