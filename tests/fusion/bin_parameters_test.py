@@ -200,7 +200,10 @@ def run(_context: str):
         docs, passed = equivalenceCase(entry, app, label, changes, finalOverrides, **overrides)
         documents.extend(docs)
         results.append(passed)
-    # second bin in the same design gets the next prefix
+    # two bins in one design get consecutive prefixes
+    document = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    documents.append(document)
     args = types.SimpleNamespace(command=types.SimpleNamespace(commandInputs=dialogInputs(entry)), executeFailed=False, executeFailedMessage='')
     entry.generateBin(args)
     args = types.SimpleNamespace(command=types.SimpleNamespace(commandInputs=dialogInputs(entry)), executeFailed=False, executeFailedMessage='')
