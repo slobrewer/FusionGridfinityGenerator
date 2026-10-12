@@ -58,12 +58,16 @@ def createGridfinityBinBodyCutout(
     if input.hasScoop:
         [innerCutoutScoopFace, innerCutoputScoopOppositeFace] = getInnerCutoutScoopFace(innerCutoutBody)
         scoopEdge = faceUtils.getBottomHorizontalEdge(innerCutoutScoopFace.edges)
-        scoopHeightLimit = input.height
-        if isParametric(input.height):
-            # a scoop as tall as the wall consumes the whole face and later fillets lose their
-            # edges when the height changes; leaving a sliver of wall keeps the topology stable
-            scoopHeightLimit = input.height - const.BIN_SCOOP_MIN_TOP_WALL
-        scoopMaxRadius = dmax(dmin(input.scoopMaxRadius, scoopHeightLimit), input.filletRadius)
+        scoopLimit = input.height
+        if isParametric(input.height, input.length):
+            # a scoop as tall as the wall, or as long as the compartment, consumes a whole face and
+            # later fillets lose their edges when the size changes; leaving a sliver of wall and of
+            # floor (in front of the back bottom fillet) keeps the topology stable
+            scoopLimit = dmin(
+                input.height - const.BIN_SCOOP_MIN_TOP_WALL,
+                input.length - input.filletRadius - const.BIN_SCOOP_MIN_TOP_WALL,
+            )
+        scoopMaxRadius = dmax(dmin(input.scoopMaxRadius, scoopLimit), input.filletRadius)
         filletUtils.createFillet(
             [scoopEdge],
             scoopMaxRadius,

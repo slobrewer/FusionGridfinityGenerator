@@ -14,7 +14,9 @@ def simpleCylinder(
     radius: float,
     centerBottom: adsk.core.Point3D,
     targetComponent: adsk.fusion.Component,
+    cutFrom: adsk.fusion.BRepBody = None,
 ):
+    """New cylinder body, or with `cutFrom` a cylindrical cut from that body (returns the feature)."""
     baseConstructionPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
     baseConstructionPlaneInput.setByOffset(plane, toValueInput(planeOffset))
     baseConstructionPlane = targetComponent.constructionPlanes.add(baseConstructionPlaneInput)
@@ -57,14 +59,14 @@ def simpleCylinder(
     
     cylinderExtrude = extrudeUtils.simpleDistanceExtrude(
         cylinderBaseSketch.profiles.item(0),
-        adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+        adsk.fusion.FeatureOperations.CutFeatureOperation if cutFrom is not None else adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
         height,
         adsk.fusion.ExtentDirections.PositiveExtentDirection,
-        [],
+        [cutFrom] if cutFrom is not None else [],
         targetComponent,
     )
     cylinderExtrude.name = "Simple cylinder extrude"
-    return cylinderExtrude.bodies.item(0)
+    return cylinderExtrude if cutFrom is not None else cylinderExtrude.bodies.item(0)
 
 def simpleBox(
     plane: adsk.core.Base,

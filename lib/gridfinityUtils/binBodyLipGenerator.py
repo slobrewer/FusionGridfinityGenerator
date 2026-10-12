@@ -54,6 +54,10 @@ def createGridfinityBinBodyLip(
         lipBodyExtrude.endFaces.item(0),
         adsk.core.ValueInput.createByReal(0)
     )
+    # create the plane while the lip's top face is untouched; the notch cut below changes it
+    if const.BIN_LIP_TOP_RECESS_HEIGHT > const.DEFAULT_FILTER_TOLERANCE:
+        lipCutoutConstructionPlane = targetComponent.constructionPlanes.add(lipCutoutPlaneInput)
+        lipCutoutConstructionPlane.name = "top lip edge plane"
 
     if input.hasLipNotches:
         lipCutoutInput = BaseGeneratorInput()
@@ -68,22 +72,17 @@ def createGridfinityBinBodyLip(
         lipCutoutInput.xyClearance = input.xyClearance
         lipCutoutInput.hasBottomChamfer = False
         lipCutoutInput.cornerFilletRadius = input.binCornerFilletRadius + input.xyClearance * 2
-        lipCutout = baseGenerator.createSingleGridfinityBaseBody(lipCutoutInput, targetComponent)
-        lipCutout.name = "Lip cutout"
-        lipCutoutBodies.append(lipCutout)
-
-        patternInputBodies = adsk.core.ObjectCollection.create()
-        patternInputBodies.add(lipCutout)
-        patternInput = features.rectangularPatternFeatures.createInput(patternInputBodies,
-            targetComponent.xConstructionAxis,
-            adsk.core.ValueInput.createByReal(input.binWidth),
-            toValueInput(input.baseWidth),
-            adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
-        patternInput.directionTwoEntity = targetComponent.yConstructionAxis
-        patternInput.quantityTwo = adsk.core.ValueInput.createByReal(input.binLength)
-        patternInput.distanceTwo = toValueInput(input.baseLength)
-        rectangularPattern = features.rectangularPatternFeatures.add(patternInput)
-        lipCutoutBodies = lipCutoutBodies + list(rectangularPattern.bodies)
+        # cut one notch cutout from the lip and pattern those features, so the notch count can
+        # follow the bin size (a pattern of cutout bodies cannot)
+        baseGenerator.createBaseFeaturePattern(
+            lipCutoutInput,
+            input.binWidth,
+            input.binLength,
+            lipBody,
+            targetComponent,
+            combine=combineUtils.cutBody,
+            spacing=(input.baseWidth, input.baseLength),
+        )
 
         lipMiddleCutoutOrigin = geometryUtils.createOffsetPoint(
             input.origin,
@@ -124,8 +123,6 @@ def createGridfinityBinBodyLip(
         lipCutoutBodies.append(lipCutout)
 
     if const.BIN_LIP_TOP_RECESS_HEIGHT > const.DEFAULT_FILTER_TOLERANCE:
-        lipCutoutConstructionPlane = targetComponent.constructionPlanes.add(lipCutoutPlaneInput)
-        lipCutoutConstructionPlane.name = "top lip edge plane"
         topChamferSketch: adsk.fusion.Sketch = targetComponent.sketches.add(lipCutoutConstructionPlane)
         topChamferSketch.name = "Lip top chamfer"
         sketchUtils.createRectangle(

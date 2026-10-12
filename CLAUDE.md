@@ -38,7 +38,11 @@ model. Plan: `docs/PARAMETRIC_PLAN.md`. Progress log (update after every milesto
 - Expression function arguments use **semicolons**: `max(a; b)`, `min(a; b)`.
 - `sketchDimension.parameter.expression = '...'` works after the dimension is created.
 - Patterning **bodies** and combining later does not survive a quantity change; patterning
-  **features** (incl. Combine) does. See plan §1.
+  **features** (incl. Combine) does. See plan §1. But feature patterns are fragile and fail by
+  size + feature mix: pattern into a *simple* target body (the base "carrier"), act on that outside
+  body from inside the pattern, no body-to-body combines and no Move features inside the pattern,
+  holes as extrude-cuts. Details + the failure behind each rule: `docs/PARAMETRIC_PROGRESS.md`
+  ("M4 — what it took"). Always run the `stress` group after touching the base/lip generators.
 - Timeline must be on (design history); the add-in refuses Direct Design.
 - Timeline groups report `healthState == 5` with no message; check group members for health.
 - Tests: `python3 -m unittest discover -s tests` (plain Python) and

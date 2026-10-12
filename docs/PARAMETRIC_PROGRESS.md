@@ -10,7 +10,7 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
 | M1 Height chain | done 2026-10-11 | `parametric-user-parameters`, PR #1 | `bin_height_u`, `height_unit` live |
 | M2 Footprint scalars | done 2026-10-11 | `parametric-m2`, PR #2 | `base_width`, `base_length`, `xy_clearance`, `wall_thickness` live |
 | M3 Feature scalars | done 2026-10-11 | `parametric-m3`, PR #3 | screw/magnet diameter, magnet depth, scoop radius, tab length/width/offset/angle live |
-| M4 X/Y count (feature pattern) | not started | | |
+| M4 X/Y count (feature pattern) | done 2026-10-11 | `parametric-m4`, PR #4 | `bin_width_u`, `bin_length_u` live (body bins); bases rebuilt as a feature pattern into a carrier |
 | M5 Baseplate | not started | | |
 
 ## How to test
@@ -65,6 +65,36 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
 - The fusion MCP times out after a few minutes but the script keeps running and interleaves with
   later calls (via `adsk.doEvents()`); one test group per call.
 
+### M4 (bin X/Y count) — what it took
+
+Feature patterns (`rectangularPatternFeatures` over features) follow a count change; body
+patterns + Combine do not. But Fusion's feature patterns are fragile, and failures depend on the
+bin size *and* the feature mix (a 5x5 full bin failed while 4x4 and 5x5-without-scoop worked), so
+every rule below came from a failing case:
+1. **Join the bases into a simple carrier, not the bin.** Pattern combines that target the finished
+   bin body fail in some copies (`MULTIPLE_TARGET_ERROR`, a base left as a separate body). The
+   bases are joined into a 0.05 mm "carrier" plate (inside the bin floor, 4 mm in from the outline)
+   *before* the bin body exists; the carrier then joins the bin as one body for any count.
+2. **No new bodies, fillets or chamfers inside the pattern.** Each base is three sketch extrudes
+   joined straight into the carrier: top section tapered 45° (a rounded rectangle tapered by 45°
+   is exactly upstream's corner fillet + 45° chamfer), straight mid section, bottom section tapered
+   45°. A new body per base (even fillet/chamfer on it, then a Combine) failed when *growing* a 2x1
+   bin with scoop + tab + magnets + screws ("All tool bodies are lost" — the pattern's new bodies
+   apparently collide with bodies made later in the timeline); fillets/chamfers on the carrier
+   failed where neighbouring bases meet (`ASM_BL_GEOM_TOO_CMPLX`).
+3. **No body-to-body combines inside the pattern.** Holes are extrude-cuts into the carrier (not
+   cutout bodies + Combine), repeated by a circular pattern of *features*. Cutout bodies combined
+   inside nested patterns produced `IDENTICAL_TARGET_AND_TOOL_BODY` or a silently missing groove.
+4. **No Move features in the pattern.** The magnet groove (cylinder ∩ boxes, rotated -45°) is now
+   two sketch profiles drawn already rotated (strip clipped by the magnet circle; a diamond).
+5. Fusion calls a sketch over-constrained when two points get distance dimensions of the same value
+   on the same axis; `createPolygon` aligns such points with a constraint instead.
+6. Lip notch cutouts are wider than their spacing — pass the spacing explicitly.
+7. Clearance cut: no explicit participant bodies (the list loses its reference on count changes).
+8. Scoop: also capped at `compartment length - fillet radius - 0.5 mm` (else it consumes the floor
+   and the floor fillets lose their edges when the bin shrinks).
+Base-only bins keep upstream's body pattern; their count parameters are marked info only.
+
 ## Log
 
 - 2026-10-11 — Forked, cloned, branch `parametric-user-parameters`, symlinked into Fusion AddIns
@@ -85,6 +115,11 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
   length/width/offset/angle. Shelled tab rebuilt as intersect-with-outline + join (see Lessons).
   In Fusion: upstream 5/5, height 10/10, footprint 16/16, features 11/11, prefix 1/1,
   baseplate 5/5.
+- 2026-10-11 — M4 implemented after many Fusion pattern failures (see "M4 — what it took"):
+  bases (and lip notches) as feature patterns, carrier body, tapered-extrude base, holes as cuts,
+  groove drawn pre-rotated, clearance cut without participant list, scoop length cap. New test
+  groups: `count` (10 edited-vs-fresh incl. 2x3→3x4/1x1, 1x1→3x2, shelled, solid, body-only) and
+  `stress` (6 mixes x 6 sizes up to 6x3: create == App Store build, count edit == fresh build).
 
 ## Current state / next step
 
