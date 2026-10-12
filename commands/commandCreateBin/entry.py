@@ -937,6 +937,8 @@ def generateBin(args: adsk.core.CommandEventArgs):
             spec = next(spec for spec in binParameters.BIN_PARAMETER_SPECS if spec.key == key)
             return binParams[key] if spec.live else plainValue
 
+        xyClearance = liveValue('xy_clearance', xyClearance)
+
         originalTimelineCount = des.timeline.count
         if des.designIntent == adsk.fusion.DesignIntentTypes.HybridDesignIntentType:
             # create new component, only allowed in hybrid intent type
@@ -955,8 +957,8 @@ def generateBin(args: adsk.core.CommandEventArgs):
             byX=-xyClearance,
             byY=-xyClearance,
         )
-        baseGeneratorInput.baseWidth = base_width_unit.value
-        baseGeneratorInput.baseLength = base_length_unit.value
+        baseGeneratorInput.baseWidth = liveValue('base_width', base_width_unit.value)
+        baseGeneratorInput.baseLength = liveValue('base_length', base_length_unit.value)
         baseGeneratorInput.xyClearance = xyClearance
         baseGeneratorInput.hasScrewHoles = bin_screw_holes.value and not isShelled
         baseGeneratorInput.hasMagnetCutouts = bin_magnet_cutouts.value and not isShelled
@@ -981,13 +983,13 @@ def generateBin(args: adsk.core.CommandEventArgs):
         binBodyInput.binWidth = bin_width.value
         binBodyInput.binLength = bin_length.value
         binBodyInput.binHeight = liveValue('bin_height_u', bin_height.value)
-        binBodyInput.baseWidth = base_width_unit.value
-        binBodyInput.baseLength = base_length_unit.value
+        binBodyInput.baseWidth = liveValue('base_width', base_width_unit.value)
+        binBodyInput.baseLength = liveValue('base_length', base_length_unit.value)
         binBodyInput.heightUnit = liveValue('height_unit', height_unit.value)
         binBodyInput.xyClearance = xyClearance
         binBodyInput.binCornerFilletRadius = const.BIN_CORNER_FILLET_RADIUS - xyClearance
         binBodyInput.isSolid = isSolid or isShelled
-        binBodyInput.wallThickness = bin_wall_thickness.value
+        binBodyInput.wallThickness = liveValue('wall_thickness', bin_wall_thickness.value)
         binBodyInput.hasScoop = has_scoop.value and isHollow
         binBodyInput.scoopMaxRadius = binScoopMaxRadius.value
         binBodyInput.hasTab = hasTabInput.value and isHollow

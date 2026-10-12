@@ -68,6 +68,25 @@ class ArithmeticTests(unittest.TestCase):
         point = DimPoint(0, 0, self.heightUnit * 2)
         self.assertEqual(point.z.expr, 'gfb1_height_unit * 2')
 
+    def test_identities_keep_expressions_short(self):
+        self.assertIs(self.heightUnit + 0, self.heightUnit)
+        self.assertIs(0 + self.heightUnit, self.heightUnit)
+        self.assertIs(self.heightUnit - 0, self.heightUnit)
+        self.assertEqual((0 - self.heightUnit).expr, '-gfb1_height_unit')
+        self.assertIs(self.heightUnit * 1, self.heightUnit)
+        self.assertIs(1 * self.heightUnit, self.heightUnit)
+        self.assertIs(self.heightUnit / 1, self.heightUnit)
+        self.assertEqual((1 / self.binHeight).expr, '1 / gfb1_bin_height_u')
+        self.assertEqual(0 * self.heightUnit, 0.0)
+        self.assertIs(self.heightUnit - 0 * self.heightUnit, self.heightUnit)
+
+    def test_double_negation_and_abs(self):
+        offset = self.heightUnit - 0.1
+        self.assertIs(-(-offset), offset)
+        self.assertEqual(abs(-offset).expr, 'gfb1_height_unit - 1 mm')
+        self.assertEqual(abs(0 - self.heightUnit).expr, 'gfb1_height_unit')
+        self.assertIs(abs(offset), offset)
+
 
 if __name__ == '__main__':
     unittest.main()

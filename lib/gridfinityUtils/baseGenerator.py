@@ -6,10 +6,30 @@ from ...lib.gridfinityUtils.baseGeneratorInput import BaseGeneratorInput
 from . import sketchUtils, const, edgeUtils, commonUtils, combineUtils, faceUtils, extrudeUtils, shapeUtils, geometryUtils
 from ...lib import fusion360utils as futil
 from ... import config
-from .dim import toValueInput, asPoint3D
+from .dim import toValueInput, asPoint3D, applyExpression, isParametric, DimPoint
 
 app = adsk.core.Application.get()
 ui = app.userInterface
+
+def createVerticalAxis(x, y, name: str, targetComponent: adsk.fusion.Component):
+    """Hidden construction axis parallel to Z through (x, y); follows x/y when they are Dims."""
+    planes = targetComponent.constructionPlanes
+    xzPlaneInput = planes.createInput()
+    xzPlaneInput.setByOffset(targetComponent.xZConstructionPlane, toValueInput(y))
+    xzPlane = planes.add(xzPlaneInput)
+    xzPlane.name = f"{name} XZ plane"
+    xzPlane.isLightBulbOn = False
+    yzPlaneInput = planes.createInput()
+    yzPlaneInput.setByOffset(targetComponent.yZConstructionPlane, toValueInput(x))
+    yzPlane = planes.add(yzPlaneInput)
+    yzPlane.name = f"{name} YZ plane"
+    yzPlane.isLightBulbOn = False
+    axisInput = targetComponent.constructionAxes.createInput()
+    axisInput.setByTwoPlanes(xzPlane, yzPlane)
+    axis = targetComponent.constructionAxes.add(axisInput)
+    axis.name = f"{name} axis"
+    axis.isLightBulbOn = False
+    return axis
 
 def createCircleAtPointSketch(
     plane: adsk.core.Base,
@@ -19,32 +39,35 @@ def createCircleAtPointSketch(
 ):
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     circleSketch: adsk.fusion.Sketch = sketches.add(plane)
-    circleCenterOnSketch = circleSketch.modelToSketchSpace(circleCenterPoint)
+    circleCenterOnSketch = sketchUtils.modelToSketch(circleSketch, circleCenterPoint)
     dimensions: adsk.fusion.SketchDimensions = circleSketch.sketchDimensions
     sketchUtils.convertToConstruction(circleSketch.sketchCurves)
     circle = circleSketch.sketchCurves.sketchCircles.addByCenterRadius(
-        adsk.core.Point3D.create(circleCenterOnSketch.x, circleCenterOnSketch.y, 0),
-        radius,
+        adsk.core.Point3D.create(float(circleCenterOnSketch.x), float(circleCenterOnSketch.y), 0),
+        float(radius),
     )
-    dimensions.addDiameterDimension(
+    diameterDimension = dimensions.addDiameterDimension(
         circle,
         adsk.core.Point3D.create(0, circle.centerSketchPoint.geometry.y * 2, 0),
         True,
     )
-    dimensions.addDistanceDimension(
+    applyExpression(diameterDimension, radius * 2)
+    centerXDimension = dimensions.addDistanceDimension(
         circleSketch.originPoint,
         circle.centerSketchPoint,
         adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation,
         adsk.core.Point3D.create(circle.centerSketchPoint.geometry.x, 0, 0),
         True
         )
-    dimensions.addDistanceDimension(
+    centerYDimension = dimensions.addDistanceDimension(
         circleSketch.originPoint,
         circle.centerSketchPoint,
         adsk.fusion.DimensionOrientations.VerticalDimensionOrientation,
         adsk.core.Point3D.create(0, circle.centerSketchPoint.geometry.y, 0),
         True
         )
+    applyExpression(centerXDimension, circleCenterOnSketch.x)
+    applyExpression(centerYDimension, circleCenterOnSketch.y)
 
     return (circleSketch, circle)
 
@@ -60,16 +83,17 @@ def createTabAtCircleEdgeSketch(
         circleCenterPoint,
         targetComponent,
     )
-    circleCenterOnSketch = geometryUtils.pointToXY(circleSketch.modelToSketchSpace(circleCenterPoint))
+    centerX, centerY, centerZ, radiusValue = float(circleCenterPoint.x), float(circleCenterPoint.y), float(circleCenterPoint.z), float(radius)
+    circleCenterOnSketch = geometryUtils.pointToXY(circleSketch.modelToSketchSpace(adsk.core.Point3D.create(centerX, centerY, centerZ)))
     angularPointOnSketch = geometryUtils.pointToXY(circleSketch.modelToSketchSpace(
-        adsk.core.Point3D.create(circleCenterPoint.x + radius, circleCenterPoint.y + radius, circleCenterPoint.z)
+        adsk.core.Point3D.create(centerX + radiusValue, centerY + radiusValue, centerZ)
     ))
     dimensions: adsk.fusion.SketchDimensions = circleSketch.sketchDimensions
     constraints: adsk.fusion.GeometricConstraints = circleSketch.geometricConstraints
     sketchUtils.convertToConstruction(circleSketch.sketchCurves)
     verticalConstructionLine = circleSketch.sketchCurves.sketchLines.addByTwoPoints(
         circleCenterOnSketch,
-        adsk.core.Point3D.create(circleCenterOnSketch.x, circleCenterOnSketch.y + radius, circleCenterOnSketch.z)
+        adsk.core.Point3D.create(circleCenterOnSketch.x, circleCenterOnSketch.y + radiusValue, circleCenterOnSketch.z)
     )
     verticalConstructionLine.isConstruction = True
     diagonalConstructionLine = circleSketch.sketchCurves.sketchLines.addByTwoPoints(
@@ -101,12 +125,13 @@ def createTabAtCircleEdgeSketch(
     )
     circle = circleSketch.sketchCurves.sketchCircles.addByCenterRadius(
         diagonalConstructionLine.endSketchPoint,
-        radius / 2,
+        radiusValue / 2,
     )
-    dimensions.addRadialDimension(
+    tabRadiusDimension = dimensions.addRadialDimension(
         circle,
         circleCenterOnSketch,
     )
+    applyExpression(tabRadiusDimension, radius / 2)
 
     return circleSketch
 
@@ -126,7 +151,7 @@ def createSingleGridfinityBaseBody(
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     basePlateSketch: adsk.fusion.Sketch = sketches.add(baseConstructionPlane)
     basePlateSketch.name = 'Base plate sketch'
-    createRectangle(actual_base_width, actual_base_length, basePlateSketch.modelToSketchSpace(asPoint3D(input.originPoint)), basePlateSketch)
+    createRectangle(actual_base_width, actual_base_length, sketchUtils.modelToSketch(basePlateSketch, input.originPoint), basePlateSketch)
 
     # extrude top section
     topSectionExtrudeDepth = adsk.core.ValueInput.createByReal(const.BIN_BASE_TOP_SECTION_HEIGH)
@@ -146,7 +171,7 @@ def createSingleGridfinityBaseBody(
     filletInput = filletFeatures.createInput()
     filletInput.isRollingBallCorner = True
     fillet_edges = edgeUtils.selectEdgesByLength(baseBody.faces, const.BIN_BASE_TOP_SECTION_HEIGH, const.DEFAULT_FILTER_TOLERANCE)
-    filletInput.edgeSetInputs.addConstantRadiusEdgeSet(fillet_edges, adsk.core.ValueInput.createByReal(input.cornerFilletRadius), True)
+    filletInput.edgeSetInputs.addConstantRadiusEdgeSet(fillet_edges, toValueInput(input.cornerFilletRadius), True)
     filletFeatures.add(filletInput).name = 'Base corner fillet'
 
     # chamfer top section
@@ -185,12 +210,12 @@ def createSingleGridfinityBaseBody(
     cutoutBodies = adsk.core.ObjectCollection.create()
 
     baseBottomPlane = baseBottomExtrude.endFaces.item(0)
-    baseHoleCenterPoint = adsk.core.Point3D.create(
+    baseHoleCenterPoint = DimPoint(
         const.DIMENSION_SCREW_HOLES_OFFSET - input.xyClearance,
         const.DIMENSION_SCREW_HOLES_OFFSET - input.xyClearance,
         baseBottomPlane.boundingBox.minPoint.z
     )
-    cutoutCenterPoint = adsk.core.Point3D.create(baseHoleCenterPoint.x, baseHoleCenterPoint.y, 0)
+    cutoutCenterPoint = DimPoint(baseHoleCenterPoint.x, baseHoleCenterPoint.y, 0)
     if input.hasScrewHoles:
         screwHoleBody = shapeUtils.simpleCylinder(
             baseBottomPlane,
@@ -250,7 +275,7 @@ def createSingleGridfinityBaseBody(
                 input.magnetCutoutsDiameter,
                 input.screwHolesDiameter,
                 -const.BIN_MAGNET_HOLE_GROOVE_DEPTH / 2,
-                adsk.core.Point3D.create(baseHoleCenterPoint.x + input.magnetCutoutsDiameter / 2, baseHoleCenterPoint.y - input.screwHolesDiameter / 2, 0),
+                DimPoint(baseHoleCenterPoint.x + input.magnetCutoutsDiameter / 2, baseHoleCenterPoint.y - input.screwHolesDiameter / 2, 0),
                 targetComponent,
             )
             grooveLayer1.name = "Groove layer 1 body"
@@ -260,17 +285,28 @@ def createSingleGridfinityBaseBody(
                 input.screwHolesDiameter,
                 input.screwHolesDiameter,
                 -const.BIN_MAGNET_HOLE_GROOVE_DEPTH / 2,
-                adsk.core.Point3D.create(baseHoleCenterPoint.x + input.screwHolesDiameter / 2, baseHoleCenterPoint.y - input.screwHolesDiameter / 2, 0),
+                DimPoint(baseHoleCenterPoint.x + input.screwHolesDiameter / 2, baseHoleCenterPoint.y - input.screwHolesDiameter / 2, 0),
                 targetComponent,
             )
             grooveLayer2.name = "Groove layer 2 body"
             combineUtils.intersectBody(grooveBody, commonUtils.objectCollectionFromList([grooveLayer1, grooveLayer2]), targetComponent)
 
             rotateGrooveBodyInput = targetComponent.features.moveFeatures.createInput2(commonUtils.objectCollectionFromList([grooveBody]))
-            verticalAxisVector = adsk.core.Vector3D.create(0, 0, 1.0)
-            transformRotate = adsk.core.Matrix3D.create()
-            transformRotate.setToRotation(math.radians(-45), verticalAxisVector, cutoutCenterPoint)
-            rotateGrooveBodyInput.defineAsFreeMove(transformRotate)
+            if isParametric(cutoutCenterPoint.x, cutoutCenterPoint.y):
+                # rotate about an axis that follows the hole centre, a free move would stay put
+                holeAxis = createVerticalAxis(cutoutCenterPoint.x, cutoutCenterPoint.y, "Magnet groove", targetComponent)
+                # -45 degrees about +Z, whichever way the constructed axis points
+                grooveAngle = math.radians(-45) if holeAxis.geometry.direction.z > 0 else math.radians(45)
+                # a rotate move only accepts the axis in the active occurrence's context
+                activeOccurrence = targetComponent.parentDesign.activeOccurrence
+                if activeOccurrence is not None and activeOccurrence.component == targetComponent:
+                    holeAxis = holeAxis.createForAssemblyContext(activeOccurrence)
+                rotateGrooveBodyInput.defineAsRotate(holeAxis, adsk.core.ValueInput.createByReal(grooveAngle))
+            else:
+                verticalAxisVector = adsk.core.Vector3D.create(0, 0, 1.0)
+                transformRotate = adsk.core.Matrix3D.create()
+                transformRotate.setToRotation(math.radians(-45), verticalAxisVector, asPoint3D(cutoutCenterPoint))
+                rotateGrooveBodyInput.defineAsFreeMove(transformRotate)
             ratateGrooveBodyFeature = targetComponent.features.moveFeatures.add(rotateGrooveBodyInput)
             ratateGrooveBodyFeature.name = "Rotate groove by 45 degree"
 
@@ -283,12 +319,12 @@ def createSingleGridfinityBaseBody(
             cutoutBodies = commonUtils.objectCollectionFromList(joinFeature.bodies)
 
         baseXZMidPlaneInput = targetComponent.constructionPlanes.createInput()
-        baseXZMidPlaneInput.setByOffset(targetComponent.xZConstructionPlane, adsk.core.ValueInput.createByReal(input.baseLength / 2 - input.xyClearance))
+        baseXZMidPlaneInput.setByOffset(targetComponent.xZConstructionPlane, toValueInput(input.baseLength / 2 - input.xyClearance))
         baseXZMidPlane = targetComponent.constructionPlanes.add(baseXZMidPlaneInput)
         baseXZMidPlane.name = "Base XZ mid plane"
         baseXZMidPlane.isLightBulbOn = False
         baseYZMidPlaneInput = targetComponent.constructionPlanes.createInput()
-        baseYZMidPlaneInput.setByOffset(targetComponent.yZConstructionPlane, adsk.core.ValueInput.createByReal(input.baseWidth / 2 - input.xyClearance))
+        baseYZMidPlaneInput.setByOffset(targetComponent.yZConstructionPlane, toValueInput(input.baseWidth / 2 - input.xyClearance))
         baseYZMidPlane = targetComponent.constructionPlanes.add(baseYZMidPlaneInput)
         baseYZMidPlane.name = "Base YZ mid plane"
         baseYZMidPlane.isLightBulbOn = False
@@ -390,11 +426,11 @@ def createBaseBodyPattern(
     patternInput = rectangularPatternFeatures.createInput(patternInputBodies,
         targetComponent.xConstructionAxis,
         adsk.core.ValueInput.createByReal(basesXCount),
-        adsk.core.ValueInput.createByReal(baseConfiguration.baseWidth),
+        toValueInput(baseConfiguration.baseWidth),
         adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
     patternInput.directionTwoEntity = targetComponent.yConstructionAxis
     patternInput.quantityTwo = adsk.core.ValueInput.createByReal(basesYCount)
-    patternInput.distanceTwo = adsk.core.ValueInput.createByReal(baseConfiguration.baseLength)
+    patternInput.distanceTwo = toValueInput(baseConfiguration.baseLength)
     rectangularPattern = rectangularPatternFeatures.add(patternInput)
     return list(rectangularPattern.bodies) + [baseBody]
 
@@ -408,7 +444,7 @@ def cutBaseClearance(
     actual_base_length = baseConfiguration.baseLength * basesYCount - baseConfiguration.xyClearance * 2
     features = targetComponent.features
     baseConstructionPlaneInput: adsk.fusion.ConstructionPlaneInput = targetComponent.constructionPlanes.createInput()
-    baseConstructionPlaneInput.setByOffset(targetComponent.xYConstructionPlane, adsk.core.ValueInput.createByReal(baseConfiguration.originPoint.z))
+    baseConstructionPlaneInput.setByOffset(targetComponent.xYConstructionPlane, toValueInput(baseConfiguration.originPoint.z))
     baseConstructionPlane = targetComponent.constructionPlanes.add(baseConstructionPlaneInput)
     sketches: adsk.fusion.Sketches = targetComponent.sketches
     baseClearanceCutSketch: adsk.fusion.Sketch = sketches.add(baseConstructionPlane)
@@ -416,11 +452,11 @@ def cutBaseClearance(
     innerRectangle = createRectangle(
         actual_base_width,
         actual_base_length,
-        adsk.core.Point3D.create(
+        sketchUtils.modelToSketch(baseClearanceCutSketch, DimPoint(
             baseConfiguration.originPoint.x + baseConfiguration.xyClearance,
             baseConfiguration.originPoint.y + baseConfiguration.xyClearance,
             baseConfiguration.originPoint.z,
-        ),
+        )),
         baseClearanceCutSketch
     )
     sketchArcs = baseClearanceCutSketch.sketchCurves.sketchArcs
@@ -429,17 +465,18 @@ def cutBaseClearance(
 
     [side1, side2, side3, side4] = list(innerRectangle)
     filletRadius = baseConfiguration.cornerFilletRadius - baseConfiguration.xyClearance
-    fillet1 = sketchArcs.addFillet(side1, side1.endSketchPoint.geometry, side2, side2.startSketchPoint.geometry, filletRadius)
-    fillet2 = sketchArcs.addFillet(side2, side2.endSketchPoint.geometry, side3, side3.startSketchPoint.geometry, filletRadius)
-    fillet3 = sketchArcs.addFillet(side3, side3.endSketchPoint.geometry, side4, side4.startSketchPoint.geometry, filletRadius)
-    fillet4 = sketchArcs.addFillet(side4, side4.endSketchPoint.geometry, side1, side1.startSketchPoint.geometry, filletRadius)
+    fillet1 = sketchArcs.addFillet(side1, side1.endSketchPoint.geometry, side2, side2.startSketchPoint.geometry, float(filletRadius))
+    fillet2 = sketchArcs.addFillet(side2, side2.endSketchPoint.geometry, side3, side3.startSketchPoint.geometry, float(filletRadius))
+    fillet3 = sketchArcs.addFillet(side3, side3.endSketchPoint.geometry, side4, side4.startSketchPoint.geometry, float(filletRadius))
+    fillet4 = sketchArcs.addFillet(side4, side4.endSketchPoint.geometry, side1, side1.startSketchPoint.geometry, float(filletRadius))
 
     geometricConstraints.addEqual(fillet1, fillet2)
     geometricConstraints.addEqual(fillet2, fillet3)
     geometricConstraints.addEqual(fillet3, fillet4)
-    sketchDimensions.addRadialDimension(fillet1, fillet1.startSketchPoint.geometry)
+    filletRadiusDimension = sketchDimensions.addRadialDimension(fillet1, fillet1.startSketchPoint.geometry)
+    applyExpression(filletRadiusDimension, filletRadius)
 
-    baseClearanceCutSketch.offset(commonUtils.objectCollectionFromList([fillet1, fillet2, fillet3, fillet4, side1, side2, side3, side4]), baseConfiguration.originPoint, 1)
+    baseClearanceCutSketch.offset(commonUtils.objectCollectionFromList([fillet1, fillet2, fillet3, fillet4, side1, side2, side3, side4]), asPoint3D(baseConfiguration.originPoint), 1)
 
     cuttingProfile = min(list(baseClearanceCutSketch.profiles), key=lambda x: x.boundingBox.minPoint.x)
     clearanceCutExtrudeInput = features.extrudeFeatures.createInput(

@@ -35,6 +35,8 @@ class Dim:
         self.kind = kind
         # atomic expressions need no parentheses when used as an operand
         self.atomic = atomic
+        # set on the result of unary minus so that -(-x) gives x back
+        self.negationOf = None
 
     # constructors
     @staticmethod
@@ -77,6 +79,15 @@ class Dim:
         # a plain number added to / subtracted from a Dim has the Dim's unit;
         # a plain number in a product / quotient is a unitless scale factor
         otherKind = self.kind if op in '+-' else UNITLESS
+        if not isinstance(other, Dim):
+            # identities keep expressions short: x + 0, x - 0, 0 + x, 0 - x, x * 1, 1 * x, x / 1
+            number = float(other)
+            if number == 0 and op in '+-':
+                return -self if reverse and op == '-' else self
+            if number == 1 and (op == '*' or (op == '/' and not reverse)):
+                return self
+            if number == 0 and (op == '*' or (op == '/' and reverse)):
+                return 0.0
         other = Dim._coerce(other, otherKind)
         left, right = (other, self) if reverse else (self, other)
         if op == '+':
@@ -102,7 +113,14 @@ class Dim:
     def __rtruediv__(self, other): return self._binary(other, '/', reverse=True)
 
     def __neg__(self):
-        return Dim(-self.value, f'-{self._operand()}', self.kind, atomic=False)
+        if self.negationOf is not None:
+            return self.negationOf
+        negated = Dim(-self.value, f'-{self._operand()}', self.kind, atomic=False)
+        negated.negationOf = self
+        return negated
+
+    def __abs__(self):
+        return -self if self.value < 0 else self
 
     def __float__(self): return self.value
     def __lt__(self, other): return self.value < float(other)
@@ -175,6 +193,6 @@ def toValueInput(value):
 
 def applyExpression(sketchDimension, value):
     """Link a sketch dimension to `value`'s expression. Sketch dimensions are always positive,
-    so the expression must evaluate to the dimension's (absolute) current value."""
+    so a negative coordinate (point left of / below the sketch origin) is linked by its magnitude."""
     if isinstance(value, Dim):
-        sketchDimension.parameter.expression = value.expr
+        sketchDimension.parameter.expression = abs(value).expr
