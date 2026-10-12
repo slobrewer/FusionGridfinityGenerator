@@ -40,7 +40,7 @@ def dialogInputs(e, **overrides):
         'magnet_tabs': False, 'screw_diameter': 0.3, 'magnet_diameter': 0.65, 'magnet_depth': 0.24,
         'lip': True, 'lip_notches': False, 'scoop': False, 'scoop_radius': 2.5,
         'tab': False, 'tab_length': 1, 'tab_width': 1.3, 'tab_position': 0, 'tab_angle': 0.7853981633974483,
-        'bin_type': e.BIN_TYPE_HOLLOW, 'compartments_x': 1, 'compartments_y': 1, 'store': True,
+        'bin_type': e.BIN_TYPE_HOLLOW, 'compartments_x': 1, 'compartments_y': 1,
     }
     settings.update(overrides)
     s = settings
@@ -75,7 +75,6 @@ def dialogInputs(e, **overrides):
         e.BIN_COMPARTMENTS_TABLE_ID: types.SimpleNamespace(rowCount=1),
         e.BIN_COMPARTMENTS_GRID_BASE_WIDTH_ID: value(s['compartments_x']),
         e.BIN_COMPARTMENTS_GRID_BASE_LENGTH_ID: value(s['compartments_y']),
-        e.STORE_PARAMETERS_INPUT: value(s['store']),
     }
     return FakeInputs(items)
 
@@ -201,14 +200,6 @@ def run(_context: str):
         docs, passed = equivalenceCase(entry, app, label, changes, finalOverrides, **overrides)
         documents.extend(docs)
         results.append(passed)
-    # parameters off: upstream behaviour, no user parameters
-    document = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    args = types.SimpleNamespace(command=types.SimpleNamespace(commandInputs=dialogInputs(entry, store=False)), executeFailed=False, executeFailedMessage='')
-    passed = entry.generateBin(args) and design.userParameters.count == 0 and len(allBodies(design)) == 1
-    print(f'[{"PASS" if passed else "FAIL"}] parameters off: params={design.userParameters.count} bodies={len(allBodies(design))} {args.executeFailedMessage[:300]}')
-    documents.append(document)
-    results.append(passed)
     # second bin in the same design gets the next prefix
     args = types.SimpleNamespace(command=types.SimpleNamespace(commandInputs=dialogInputs(entry)), executeFailed=False, executeFailedMessage='')
     entry.generateBin(args)

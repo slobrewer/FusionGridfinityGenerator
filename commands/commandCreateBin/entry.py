@@ -129,7 +129,6 @@ PRESERVE_CHAGES_RADIO_GROUP_RESET = 'Reset inputs after creation'
 RESET_CHAGES_INPUT = 'reset_changes'
 SHOW_PREVIEW_INPUT = 'show_preview'
 SHOW_PREVIEW_MANUAL_INPUT = 'show_preview_manual'
-STORE_PARAMETERS_INPUT = 'store_user_parameters'
 
 INFO_TEXT = ("<b>Help:</b> Info for inputs can be found "
              "<a href=\"https://github.com/Le0Michine/FusionGridfinityGenerator/wiki/Bin-generator-options\">"
@@ -193,7 +192,6 @@ def initDefaultUiState():
     commandUIState.initValue(BIN_MAGNET_CUTOUTS_TABS_INPUT_ID, False, adsk.core.BoolValueCommandInput.classType())
     commandUIState.initValue(BIN_MAGNET_DIAMETER_INPUT, const.DIMENSION_MAGNET_CUTOUT_DIAMETER, adsk.core.ValueCommandInput.classType())
     commandUIState.initValue(BIN_MAGNET_HEIGHT_INPUT, const.DIMENSION_MAGNET_CUTOUT_DEPTH, adsk.core.ValueCommandInput.classType())
-    commandUIState.initValue(STORE_PARAMETERS_INPUT, True, adsk.core.BoolValueCommandInput.classType())
 
     commandCompartmentsTableUIState = []
     recordedDefaults = configUtils.readJsonConfig(UI_INPUT_DEFAULTS_CONFIG_PATH)
@@ -542,9 +540,6 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     xyClearanceInput.maximumValue = 0.05
     xyClearanceInput.isMaximumInclusive = True
     commandUIState.registerCommandInput(xyClearanceInput)
-    storeParametersInput = basicSizesGroup.children.addBoolValueInput(STORE_PARAMETERS_INPUT, 'Store settings as user parameters', True, '', commandUIState.getState(STORE_PARAMETERS_INPUT))
-    storeParametersInput.tooltip = 'Save the dialog settings as gfbN_* user parameters that drive the model, so it can be changed later in Modify > Change Parameters'
-    commandUIState.registerCommandInput(storeParametersInput)
 
     binDimensionsGroup = inputs.addGroupCommandInput(BIN_DIMENSIONS_GROUP, 'Main dimensions')
     binDimensionsGroup.tooltipDescription = 'Set in base units'
@@ -904,46 +899,43 @@ def generateBin(args: adsk.core.CommandEventArgs):
         binName = 'Gridfinity bin {}x{}x{}'.format(int(bin_length.value), int(bin_width.value), int(bin_height.value))
 
         # user parameters: every dialog value is recorded, the live ones drive the geometry below
-        storeParameters: adsk.core.BoolValueCommandInput = inputs.itemById(STORE_PARAMETERS_INPUT)
-        binParams = {}
-        if storeParameters.value:
-            parameterPrefix = binParameters.allocatePrefix(des)
-            binParams = binParameters.createBinParameters(des, parameterPrefix, {
-                'bin_width_u': bin_width.value,
-                'bin_length_u': bin_length.value,
-                'bin_height_u': bin_height.value,
-                'base_width': base_width_unit.value,
-                'base_length': base_length_unit.value,
-                'height_unit': height_unit.value,
-                'xy_clearance': xyClearance,
-                'wall_thickness': bin_wall_thickness.value,
-                'screw_diameter': bin_screw_hole_diameter.value,
-                'magnet_diameter': bin_magnet_cutout_diameter.value,
-                'magnet_depth': bin_magnet_cutout_depth.value,
-                'scoop_radius': binScoopMaxRadius.value,
-                'tab_length_u': binTabLength.value,
-                'tab_width': binTabWidth.value,
-                'tab_offset_u': binTabPosition.value,
-                'tab_angle': binTabAngle.value,
-                'compartments_x': compartmentsX.value,
-                'compartments_y': compartmentsY.value,
-                'compartments_custom': binCompartmentGridTypeDropdownInput.selectedItem.name == BIN_COMPARTMENTS_GRID_TYPE_CUSTOM,
-                'bin_type': 0 if isHollow else (1 if isShelled else 2),
-                'generate_body': bin_generate_body.value,
-                'generate_base': bin_generate_base.value,
-                'has_lip': with_lip.value,
-                'has_lip_notches': with_lip_notches.value,
-                'has_scoop': has_scoop.value,
-                'has_tab': hasTabInput.value,
-                'has_screw_holes': bin_screw_holes.value,
-                'has_magnets': bin_magnet_cutouts.value,
-                'has_magnet_tabs': bin_magnet_cutouts_tabs.value,
-            })
-            binName = f'{binName} [{parameterPrefix.rstrip("_")}]'
+        parameterPrefix = binParameters.allocatePrefix(des)
+        binParams = binParameters.createBinParameters(des, parameterPrefix, {
+            'bin_width_u': bin_width.value,
+            'bin_length_u': bin_length.value,
+            'bin_height_u': bin_height.value,
+            'base_width': base_width_unit.value,
+            'base_length': base_length_unit.value,
+            'height_unit': height_unit.value,
+            'xy_clearance': xyClearance,
+            'wall_thickness': bin_wall_thickness.value,
+            'screw_diameter': bin_screw_hole_diameter.value,
+            'magnet_diameter': bin_magnet_cutout_diameter.value,
+            'magnet_depth': bin_magnet_cutout_depth.value,
+            'scoop_radius': binScoopMaxRadius.value,
+            'tab_length_u': binTabLength.value,
+            'tab_width': binTabWidth.value,
+            'tab_offset_u': binTabPosition.value,
+            'tab_angle': binTabAngle.value,
+            'compartments_x': compartmentsX.value,
+            'compartments_y': compartmentsY.value,
+            'compartments_custom': binCompartmentGridTypeDropdownInput.selectedItem.name == BIN_COMPARTMENTS_GRID_TYPE_CUSTOM,
+            'bin_type': 0 if isHollow else (1 if isShelled else 2),
+            'generate_body': bin_generate_body.value,
+            'generate_base': bin_generate_base.value,
+            'has_lip': with_lip.value,
+            'has_lip_notches': with_lip_notches.value,
+            'has_scoop': has_scoop.value,
+            'has_tab': hasTabInput.value,
+            'has_screw_holes': bin_screw_holes.value,
+            'has_magnets': bin_magnet_cutouts.value,
+            'has_magnet_tabs': bin_magnet_cutouts_tabs.value,
+        })
+        binName = f'{binName} [{parameterPrefix.rstrip("_")}]'
 
         def liveValue(key: str, plainValue):
             spec = next(spec for spec in binParameters.BIN_PARAMETER_SPECS if spec.key == key)
-            return binParams[key] if spec.live and key in binParams else plainValue
+            return binParams[key] if spec.live else plainValue
 
         originalTimelineCount = des.timeline.count
         if des.designIntent == adsk.fusion.DesignIntentTypes.HybridDesignIntentType:

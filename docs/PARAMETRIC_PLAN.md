@@ -79,9 +79,8 @@ New module `lib/gridfinityUtils/binParameters.py`:
   `Dim` attribute. Idempotent: if a param with that name already exists (preview re-runs), update
   its expression instead of failing. Preview (`executePreview`) runs inside the command's
   transaction, so params created during preview are rolled back with it — verify in M0.
-- Dialog gets one checkbox in the *Changes*/*Preview* area: **"Store settings as user parameters"**
-  (default on, persisted with the other UI defaults). Off → generator receives plain floats and
-  behaves exactly as upstream (keeps the upstream-merge story clean and gives a fallback).
+- Parameters are always created; there is no on/off switch. (M0 shipped a "Store settings as user
+  parameters" checkbox; Dave had it removed 2026-10-11 — he would never turn it off.)
 
 Parameter list (bin). "Live" = geometry references it; "Info" = recorded for the record, changing
 it does nothing (documented in the comment: `(informational)`).
@@ -134,7 +133,7 @@ asserts the result (`docs/tests/` — see §4). Commit per milestone on branch
 ### M0 — Scaffolding (no geometry change)
 1. `dim.py` with unit tests runnable in plain Python (`python3 -m pytest docs/tests/test_dim.py`;
    `Dim` has no `adsk` dependency — keep `toValueInput` in a separate thin module or import lazily).
-2. `binParameters.py`: prefix allocation, idempotent create, comments, the checkbox in the dialog,
+2. `binParameters.py`: prefix allocation, idempotent create, comments,
    persisted default.
 3. `generateBin` creates all parameters (all Info at this point) and names the component/timeline
    group with the prefix.
@@ -179,7 +178,7 @@ Replace body-pattern + combine with a **feature pattern** (test #8):
 3. `rectangularPatternFeatures` over that feature list with `quantityOne = bin_width_u`,
    `distanceOne = base_width`, same for Y; `patternComputeOption = AdjustPatternCompute`.
 4. `cutBaseClearance` already uses expressions from M2.
-5. Keep the old path behind the "Store settings as user parameters" checkbox = off.
+5. No plain-value fallback in the bin command — parameters are always on (checkbox removed).
 Notches on the lip use the same base pattern (`binBodyLipGenerator`) → same treatment, or leave
 notches Info-only in M4 and do them in M4b.
 
