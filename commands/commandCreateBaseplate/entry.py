@@ -10,6 +10,7 @@ from ...lib.gridfinityUtils.const import DIMENSION_DEFAULT_WIDTH_UNIT
 from ...lib.gridfinityUtils.baseplateGenerator import createGridfinityBaseplate
 from ...lib.gridfinityUtils.baseplateGeneratorInput import BaseplateGeneratorInput
 from ...lib.gridfinityUtils import const
+from ...lib.gridfinityUtils import binParameters
 from .inputState import InputState
 from ...lib.ui.commandUiState import CommandUiState
 from ...lib.ui.unsupportedDesignTypeException import UnsupportedDesignTypeException
@@ -422,6 +423,39 @@ def generateBaseplate(args: adsk.core.CommandEventArgs):
         root = adsk.fusion.Component.cast(des.rootComponent)
         baseplateName = 'Gridfinity baseplate {}x{}'.format(int(inputsState.plateLength), int(inputsState.plateWidth))
 
+        # user parameters: every dialog value is recorded, the live ones drive the geometry below.
+        # Connection holes are side holes per plate edge cell made with body patterns and mirrors,
+        # so with them the plate count is recorded only.
+        infoOnlyKeys = {'plate_width_u', 'plate_length_u'} if inputsState.hasConnectionHoles and inputsState.plateType == BASEPLATE_TYPE_SKELETONIZED else set()
+        parameterPrefix = binParameters.allocatePrefix(des, binParameters.BASEPLATE_PARAMETER_PREFIX)
+        plateParams = binParameters.createBaseplateParameters(des, parameterPrefix, {
+            'plate_width_u': inputsState.plateWidth,
+            'plate_length_u': inputsState.plateLength,
+            'base_width': inputsState.baseWidth,
+            'base_length': inputsState.baseLength,
+            'xy_clearance': inputsState.xyClearance,
+            'magnet_diameter': inputsState.magnetSocketSize,
+            'magnet_depth': inputsState.magnetSocketDepth,
+            'screw_diameter': inputsState.screwHoleSize,
+            'screw_head_diameter': inputsState.screwHeadSize,
+            'padding_left': inputsState.paddingLeft,
+            'padding_top': inputsState.paddingTop,
+            'padding_right': inputsState.paddingRight,
+            'padding_bottom': inputsState.paddingBottom,
+            'extra_bottom_thickness': inputsState.extraBottomThickness,
+            'vertical_clearance': inputsState.verticalClearance,
+            'connection_hole_diameter': inputsState.connectionHoleSize,
+            'plate_type': {BASEPLATE_TYPE_LIGHT: 0, BASEPLATE_TYPE_FULL: 1}.get(inputsState.plateType, 2),
+            'has_magnets': inputsState.hasMagnetSockets,
+            'has_screws': inputsState.hasScrewHoles,
+            'has_padding': inputsState.hasPadding,
+            'has_connection_holes': inputsState.hasConnectionHoles,
+        }, infoOnlyKeys)
+        baseplateName = f'{baseplateName} [{parameterPrefix.rstrip("_")}]'
+
+        def liveValue(key: str, plainValue):
+            return plateParams[key] if binParameters.isLive(binParameters.BASEPLATE_PARAMETER_SPECS, key, infoOnlyKeys) else plainValue
+
         originalTimelineCount = des.timeline.count
         if des.designIntent == adsk.fusion.DesignIntentTypes.HybridDesignIntentType:
             # create new component, only allowed in hybrid intent type
@@ -434,28 +468,28 @@ def generateBaseplate(args: adsk.core.CommandEventArgs):
             gridfinityBaseplateComponent: adsk.fusion.Component = des.rootComponent
         baseplateGeneratorInput = BaseplateGeneratorInput()
 
-        baseplateGeneratorInput.baseWidth = inputsState.baseWidth
-        baseplateGeneratorInput.baseLength = inputsState.baseLength
-        baseplateGeneratorInput.xyClearance = inputsState.xyClearance
-        baseplateGeneratorInput.baseplateWidth = inputsState.plateWidth
-        baseplateGeneratorInput.baseplateLength = inputsState.plateLength
+        baseplateGeneratorInput.baseWidth = liveValue('base_width', inputsState.baseWidth)
+        baseplateGeneratorInput.baseLength = liveValue('base_length', inputsState.baseLength)
+        baseplateGeneratorInput.xyClearance = liveValue('xy_clearance', inputsState.xyClearance)
+        baseplateGeneratorInput.baseplateWidth = liveValue('plate_width_u', inputsState.plateWidth)
+        baseplateGeneratorInput.baseplateLength = liveValue('plate_length_u', inputsState.plateLength)
         baseplateGeneratorInput.hasExtendedBottom = not inputsState.plateType == BASEPLATE_TYPE_LIGHT
         baseplateGeneratorInput.hasSkeletonizedBottom = inputsState.plateType == BASEPLATE_TYPE_SKELETONIZED
         baseplateGeneratorInput.hasMagnetCutouts = inputsState.hasMagnetSockets
-        baseplateGeneratorInput.magnetCutoutsDiameter = inputsState.magnetSocketSize
-        baseplateGeneratorInput.magnetCutoutsDepth = inputsState.magnetSocketDepth
+        baseplateGeneratorInput.magnetCutoutsDiameter = liveValue('magnet_diameter', inputsState.magnetSocketSize)
+        baseplateGeneratorInput.magnetCutoutsDepth = liveValue('magnet_depth', inputsState.magnetSocketDepth)
         baseplateGeneratorInput.hasScrewHoles = inputsState.hasScrewHoles
-        baseplateGeneratorInput.screwHolesDiameter = inputsState.screwHoleSize
-        baseplateGeneratorInput.screwHeadCutoutDiameter = inputsState.screwHeadSize
+        baseplateGeneratorInput.screwHolesDiameter = liveValue('screw_diameter', inputsState.screwHoleSize)
+        baseplateGeneratorInput.screwHeadCutoutDiameter = liveValue('screw_head_diameter', inputsState.screwHeadSize)
         baseplateGeneratorInput.hasPadding = inputsState.hasPadding
-        baseplateGeneratorInput.paddingLeft = inputsState.paddingLeft
-        baseplateGeneratorInput.paddingTop = inputsState.paddingTop
-        baseplateGeneratorInput.paddingRight = inputsState.paddingRight
-        baseplateGeneratorInput.paddingBottom = inputsState.paddingBottom
-        baseplateGeneratorInput.bottomExtensionHeight = inputsState.extraBottomThickness
-        baseplateGeneratorInput.binZClearance = inputsState.verticalClearance
+        baseplateGeneratorInput.paddingLeft = liveValue('padding_left', inputsState.paddingLeft)
+        baseplateGeneratorInput.paddingTop = liveValue('padding_top', inputsState.paddingTop)
+        baseplateGeneratorInput.paddingRight = liveValue('padding_right', inputsState.paddingRight)
+        baseplateGeneratorInput.paddingBottom = liveValue('padding_bottom', inputsState.paddingBottom)
+        baseplateGeneratorInput.bottomExtensionHeight = liveValue('extra_bottom_thickness', inputsState.extraBottomThickness)
+        baseplateGeneratorInput.binZClearance = liveValue('vertical_clearance', inputsState.verticalClearance)
         baseplateGeneratorInput.hasConnectionHoles = inputsState.hasConnectionHoles
-        baseplateGeneratorInput.connectionScrewHolesDiameter = inputsState.connectionHoleSize
+        baseplateGeneratorInput.connectionScrewHolesDiameter = liveValue('connection_hole_diameter', inputsState.connectionHoleSize)
         baseplateGeneratorInput.cornerFilletRadius = const.BIN_CORNER_FILLET_RADIUS
 
         baseplateBody = createGridfinityBaseplate(baseplateGeneratorInput, gridfinityBaseplateComponent)

@@ -45,7 +45,8 @@ model. Plan: `docs/PARAMETRIC_PLAN.md`. Progress log (update after every milesto
   ("M4 — what it took"). Always run the `stress` group after touching the base/lip generators.
 - Timeline must be on (design history); the add-in refuses Direct Design.
 - Timeline groups report `healthState == 5` with no message; check group members for health.
-- Tests: `python3 -m unittest discover -s tests` (plain Python) and
+- Tests: `python3 -m unittest discover -s tests` (plain Python), `tests/fusion/baseplate_test.py`
+  (groups upstream / scalars / count / stress) and
   `tests/fusion/bin_parameters_test.py` run via the fusion MCP with
   `runpy.run_path(...)['runSuite'](['footprint'])` (named groups) or `['run'](ctx)` (everything)
   — see `docs/PARAMETRIC_PROGRESS.md`. Every new live parameter gets a case there, including an

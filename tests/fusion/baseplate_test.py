@@ -94,6 +94,9 @@ CASES = [
     ('skeletonized 3x2 magnets + screws', dict(plateType='Skeletonized', hasMagnetSockets=True, hasScrewHoles=True)),
     ('full 2x2 magnets + screws + connection holes + padding', dict(plateType='Full', plateWidth=2, hasMagnetSockets=True, hasScrewHoles=True,
         hasConnectionHoles=True, hasPadding=True, paddingLeft=0.5, paddingTop=0.3, paddingRight=0.2, paddingBottom=0.4)),
+    ('skeletonized 3x2 magnets + screws + connection holes (fixed count)', dict(plateType='Skeletonized', hasMagnetSockets=True, hasScrewHoles=True, hasConnectionHoles=True)),
+    ('skeletonized 1x1 magnets + screws', dict(plateType='Skeletonized', plateWidth=1, plateLength=1, hasMagnetSockets=True, hasScrewHoles=True)),
+    ('full 4x3 magnets + screws', dict(plateType='Full', plateWidth=4, plateLength=3, hasMagnetSockets=True, hasScrewHoles=True)),
 ]
 
 def upstreamGroup(fork, app):
@@ -114,8 +117,103 @@ def upstreamGroup(fork, app):
         results.append(passed)
     return results
 
+def plateEquivalence(fork, app, label, changes, finalOverrides, overrides):
+    """Create with `overrides`, change gfp1_ parameters, compare with a plate created directly with
+    `finalOverrides` (the edit must change the plate and match)."""
+    design, ok, message = generate(fork, app, plateState(**overrides))
+    if not ok:
+        print(f'[FAIL] {label}: create failed {message[:300]}')
+        return False
+    before = shape(design)
+    for suffix, expression in changes:
+        design.userParameters.itemByName('gfp1_' + suffix).expression = expression
+    adsk.doEvents()
+    edited, bad = shape(design), unhealthy(design)
+    merged = dict(overrides)
+    merged.update(finalOverrides)
+    directDesign, directOk, directMessage = generate(fork, app, plateState(**merged))
+    direct = shape(directDesign)
+    passed = directOk and edited != before and edited == direct and not bad
+    print(f'[{"PASS" if passed else "FAIL"}] {label}: edited={edited} direct={direct} changed={edited != before} unhealthy={bad}{"" if directOk else " " + directMessage[:200]}')
+    return passed
+
+FULL_HOLES = dict(plateType='Full', hasMagnetSockets=True, hasScrewHoles=True)
+SKELETON = dict(plateType='Skeletonized', hasMagnetSockets=True, hasScrewHoles=True)
+
+def scalarsGroup(fork, app):
+    """M5: base size, clearance, magnet/screw sizes, padding, extra bottom, vertical clearance."""
+    checks = [
+        ('base 42 -> 40 x 45 mm (full)', [('base_width', '40 mm'), ('base_length', '45 mm')], dict(baseWidth=4.0, baseLength=4.5), dict(plateType='Full')),
+        ('xy clearance 0.25 -> 0.5 mm (full, magnets + screws)', [('xy_clearance', '0.5 mm')], dict(xyClearance=0.05), FULL_HOLES),
+        ('magnet 6.5 -> 6 mm, depth 2.4 -> 2 mm (full)', [('magnet_diameter', '6 mm'), ('magnet_depth', '2 mm')], dict(magnetSocketSize=0.6, magnetSocketDepth=0.2), FULL_HOLES),
+        ('screw 3.2 -> 3 mm, head 6 -> 7 mm (full)', [('screw_diameter', '3 mm'), ('screw_head_diameter', '7 mm')], dict(screwHoleSize=0.3, screwHeadSize=0.7), FULL_HOLES),
+        ('extra bottom 6.4 -> 8 mm (full)', [('extra_bottom_thickness', '8 mm')], dict(extraBottomThickness=0.8), FULL_HOLES),
+        ('vertical clearance 0.5 -> 1 mm (light)', [('vertical_clearance', '1 mm')], dict(verticalClearance=0.1), {}),
+        ('padding left 5 -> 8 mm, top 3 -> 2 mm (full)', [('padding_left', '8 mm'), ('padding_top', '2 mm')], dict(paddingLeft=0.8, paddingTop=0.2),
+         dict(plateType='Full', hasPadding=True, paddingLeft=0.5, paddingTop=0.3, paddingRight=0.2, paddingBottom=0.4)),
+        ('magnet 6.5 -> 7 mm, base 42 -> 40 mm (skeletonized)', [('magnet_diameter', '7 mm'), ('base_width', '40 mm')], dict(magnetSocketSize=0.7, baseWidth=4.0), SKELETON),
+        ('connection hole 3.2 -> 3 mm (skeletonized + connection holes)', [('connection_hole_diameter', '3 mm')], dict(connectionHoleSize=0.3),
+         dict(SKELETON, hasConnectionHoles=True)),
+    ]
+    return [plateEquivalence(fork, app, *check) for check in checks]
+
+def countGroup(fork, app):
+    """M5: plate X/Y count (pockets as a feature pattern into a tool carrier)."""
+    checks = [
+        ('3x2 -> 4x3 (light)', [('plate_width_u', '4'), ('plate_length_u', '3')], dict(plateWidth=4, plateLength=3), {}),
+        ('3x2 -> 2x1 (full, magnets + screws)', [('plate_width_u', '2'), ('plate_length_u', '1')], dict(plateWidth=2, plateLength=1), FULL_HOLES),
+        ('3x2 -> 5x4 (skeletonized, magnets + screws)', [('plate_width_u', '5'), ('plate_length_u', '4')], dict(plateWidth=5, plateLength=4), SKELETON),
+        ('1x1 -> 3x2 (skeletonized, magnets + screws)', [('plate_width_u', '3'), ('plate_length_u', '2')], dict(plateWidth=3, plateLength=2), dict(SKELETON, plateWidth=1, plateLength=1)),
+        ('2x2 -> 3x2 (full, padding, magnets + screws)', [('plate_width_u', '3')], dict(plateWidth=3),
+         dict(FULL_HOLES, plateWidth=2, plateLength=2, hasPadding=True, paddingLeft=0.5, paddingTop=0.3, paddingRight=0.2, paddingBottom=0.4)),
+        ('3x2 -> 4x2 + base 40 mm (full)', [('plate_width_u', '4'), ('base_width', '40 mm')], dict(plateWidth=4, baseWidth=4.0), dict(plateType='Full')),
+    ]
+    results = [plateEquivalence(fork, app, *check) for check in checks]
+    # with connection holes the plate keeps upstream's body patterns: the count is recorded only
+    design, ok, _ = generate(fork, app, plateState(**dict(SKELETON, hasConnectionHoles=True)))
+    comment = design.userParameters.itemByName('gfp1_plate_width_u').comment if ok else ''
+    passed = ok and 'info only' in comment and 'info only' not in design.userParameters.itemByName('gfp1_base_width').comment
+    print(f'[{"PASS" if passed else "FAIL"}] connection holes: plate count marked info only ({comment})')
+    results.append(passed)
+    return results
+
+def stressGroup(fork, app, mixNames=None, sizes=None):
+    """Sizes x plate types: creation identical to the App Store build, and after a count change
+    identical to a plate created at the new size (Fusion pattern failures depend on size)."""
+    upstream = findUpstreamEntry()
+    mixes = [('light', {}), ('full, magnets + screws', FULL_HOLES), ('skeletonized, magnets + screws', SKELETON)]
+    results = []
+    for mixName, mix in [m for m in mixes if mixNames is None or m[0] in mixNames]:
+        for width, length in sizes or [(1, 1), (2, 1), (3, 3), (4, 2), (5, 5), (6, 3)]:
+            failures = []
+            overrides = dict(mix, plateWidth=width, plateLength=length)
+            design, ok, message = generate(fork, app, plateState(**overrides))
+            if not ok:
+                failures.append('create: ' + message[:200])
+            else:
+                created = shape(design)
+                newWidth, newLength = width + 1, max(1, length - 1)
+                design.userParameters.itemByName('gfp1_plate_width_u').expression = str(newWidth)
+                design.userParameters.itemByName('gfp1_plate_length_u').expression = str(newLength)
+                adsk.doEvents()
+                edited, bad = shape(design), unhealthy(design)
+                if upstream is not None:
+                    upstreamDesign, upstreamOk, _ = generate(upstream, app, plateState(**overrides))
+                    if upstreamOk and shape(upstreamDesign) != created:
+                        failures.append(f'create differs from upstream: {created} vs {shape(upstreamDesign)}')
+                fresh, freshOk, _ = generate(fork, app, plateState(**dict(mix, plateWidth=newWidth, plateLength=newLength)))
+                if bad or not freshOk or shape(fresh) != edited:
+                    failures.append(f'after {newWidth}x{newLength}: {bad[:2]} edited={edited} fresh={shape(fresh) if freshOk else "failed"}')
+            closeCreatedDocuments()
+            print(f'[{"FAIL" if failures else "PASS"}] {mixName} {width}x{length}' + ('' if not failures else ': ' + '; '.join(failures)))
+            results.append(not failures)
+    return results
+
 GROUPS = {
     'upstream': upstreamGroup,
+    'scalars': scalarsGroup,
+    'count': countGroup,
+    'stress': stressGroup,
 }
 
 def runSuite(groups=None):

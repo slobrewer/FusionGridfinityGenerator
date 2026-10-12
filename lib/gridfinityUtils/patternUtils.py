@@ -2,6 +2,8 @@ from typing import Tuple
 import adsk.core, adsk.fusion, traceback
 import os
 
+from .dim import toValueInput
+
 def recPattern(
     inputEntities: adsk.core.ObjectCollection,
     directions: Tuple[adsk.core.Base, adsk.core.Base],
@@ -12,12 +14,12 @@ def recPattern(
     rectangularPatternFeatures: adsk.fusion.RectangularPatternFeatures = targetComponent.features.rectangularPatternFeatures
     patternInput = rectangularPatternFeatures.createInput(inputEntities,
             directions[0],
-            adsk.core.ValueInput.createByReal(quantities[0]),
-            adsk.core.ValueInput.createByReal(distances[0]),
+            toValueInput(quantities[0]),
+            toValueInput(distances[0]),
             adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
     patternInput.directionTwoEntity = directions[1]
-    patternInput.quantityTwo = adsk.core.ValueInput.createByReal(quantities[1])
-    patternInput.distanceTwo = adsk.core.ValueInput.createByReal(distances[1])
+    patternInput.quantityTwo = toValueInput(quantities[1])
+    patternInput.distanceTwo = toValueInput(distances[1])
     return rectangularPatternFeatures.add(patternInput)
 
 def circPattern(
