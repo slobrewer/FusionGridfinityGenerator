@@ -152,6 +152,13 @@ def dmin(a, b):
     return _function('min', min, a, b)
 
 
+def dtan(angle):
+    """math.tan() that keeps the expression for an angle Dim (Fusion's tan() takes an angle)."""
+    if not isinstance(angle, Dim):
+        return math.tan(angle)
+    return Dim(math.tan(angle.value), f'tan({angle.expr})', UNITLESS, atomic=True)
+
+
 class DimPoint:
     """Point whose coordinates may be Dims. Use asPoint3D() where Fusion needs a Point3D."""
     def __init__(self, x, y, z):

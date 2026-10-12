@@ -134,12 +134,12 @@ def createGridfinityBinBody(
 
             compartmentTabInput = BinBodyTabGeneratorInput()
             tabOriginPoint = DimPoint(
-                compartmentOriginPoint.x + max(0, min(input.tabPosition, input.binWidth - input.tabLength)) * input.baseWidth,
+                compartmentOriginPoint.x + dmax(0, dmin(input.tabPosition, input.binWidth - input.tabLength)) * input.baseWidth,
                 compartmentOriginPoint.y + compartmentLength,
                 compartmentOriginPoint.z,
             )
             compartmentTabInput.origin = tabOriginPoint
-            compartmentTabInput.length = max(0, min(input.tabLength, input.binWidth)) * input.baseWidth
+            compartmentTabInput.length = dmax(0, dmin(input.tabLength, input.binWidth)) * input.baseWidth
             compartmentTabInput.width = input.tabWidth
             compartmentTabInput.overhangAngle = input.tabOverhangAngle
             compartmentTabInput.topClearance = const.BIN_TAB_TOP_CLEARANCE

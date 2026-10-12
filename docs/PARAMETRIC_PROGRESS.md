@@ -9,7 +9,7 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
 | M0 Scaffolding | done 2026-10-11 | `parametric-user-parameters`, PR #1 | `dim.py` + unit tests, `binParameters.py`, 29 `gfbN_*` params (always created) |
 | M1 Height chain | done 2026-10-11 | `parametric-user-parameters`, PR #1 | `bin_height_u`, `height_unit` live |
 | M2 Footprint scalars | done 2026-10-11 | `parametric-m2`, PR #2 | `base_width`, `base_length`, `xy_clearance`, `wall_thickness` live |
-| M3 Feature scalars | not started | | |
+| M3 Feature scalars | done 2026-10-11 | `parametric-m3`, PR #3 | screw/magnet diameter, magnet depth, scoop radius, tab length/width/offset/angle live |
 | M4 X/Y count (feature pattern) | not started | | |
 | M5 Baseplate | not started | | |
 
@@ -49,6 +49,21 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
   in a `finally`.
 - Known limit (M2): `wall_thickness` above the lip wall (2.15 mm) does not add/remove the lip
   bottom chamfer that thinner walls get at creation time — that is a create-time branch.
+- Shelled-bin label tab: upstream cut the tab with the bin and removed the leftover slivers (where
+  the tab pokes out of the rounded outer corners). Which slivers exist depends on the tab position,
+  so editing `tab_offset_u` + `tab_length_u` deleted the main tab instead ("tool body is lost").
+  Now the tab is intersected with the bin outline inset by half the shell thickness (always one
+  body) and joined; identical to upstream at creation (volume + 356 faces). A plain back-wall clip
+  box is *not* enough: near the corner the outer wall dips below the inner back-wall line and a
+  0.05 mm sliver survives (4 extra faces).
+- Tab angle/width: `tab_width` drives the sketch's top-edge dimension through
+  `width + 0.6 mm / tan((90 deg - angle) / 2)` (`dtan`), `tab_angle` the angular dimension (or its
+  supplement, whichever Fusion measured). A constant length in a quotient must be `Dim.cm(...)`,
+  else it is coerced unitless and Fusion reads it as mm.
+- Known limit (M3): the magnet/screw groove exists only when `base height - magnet depth > 0.6 mm`
+  at creation; changing `magnet_depth` across that line does not add/remove it.
+- The fusion MCP times out after a few minutes but the script keeps running and interleaves with
+  later calls (via `adsk.doEvents()`); one test group per call.
 
 ## Log
 
@@ -65,13 +80,17 @@ Plan: `PARAMETRIC_PLAN.md`. Update this file at the end of every session.
   size and position dimensions; base and lip-notch pattern spacing, mid planes, clearance cut,
   fillet/chamfer radii and shell thickness take expressions. In Fusion: 27/27 (16 new footprint
   equivalences: base 40x45, wall 1.6 and 0.8, xy 0.5 on full / shelled+tab / solid / no-lip bins).
+  Upstream group: fresh bins identical to the App Store build; baseplate_test.py 5/5. PR #2.
+- 2026-10-11 — M3 implemented: screw/magnet diameters, magnet depth, scoop radius, tab
+  length/width/offset/angle. Shelled tab rebuilt as intersect-with-outline + join (see Lessons).
+  In Fusion: upstream 5/5, height 10/10, footprint 16/16, features 11/11, prefix 1/1,
+  baseplate 5/5.
 
 ## Current state / next step
 
-Demo-able: create a bin with the dialog, then Modify > Change Parameters > `gfb1_bin_height_u`,
-`gfb1_height_unit`, `gfb1_base_width` / `gfb1_base_length`, `gfb1_wall_thickness`,
-`gfb1_xy_clearance`. Not yet verified by hand: that preview ("Update preview once") does not
-leave extra `gfbN_` parameters behind.
+Demo-able: create a bin with the dialog, then Modify > Change Parameters > any numeric `gfb1_*`
+value except the bin X/Y count: height, height unit, base size, wall, xy clearance, screw/magnet
+sizes, magnet depth, scoop radius, tab length/width/offset/angle. Not yet verified by hand: that
+preview ("Update preview once") does not leave extra `gfbN_` parameters behind.
 
-Next step: M3 — feature scalars (screw/magnet diameter, magnet depth, tab length/width/offset/angle,
-scoop radius).
+Next step: M4 — bin X/Y count (`bin_width_u`, `bin_length_u`) via feature patterns.
